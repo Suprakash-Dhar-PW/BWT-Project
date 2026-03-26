@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Build output
+client/dist/
+
+# Environment variables - KEEP THESE SECRET
+.env
+.env.local
+.env.*.local
+client/.env
+client/.env.local
+
+# Vite / Dev server cache
+client/.vite/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.suo
+*.user
