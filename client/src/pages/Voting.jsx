@@ -217,7 +217,7 @@ export default function Voting() {
                   size="lg"
                   className="bg-blue-600 hover:bg-blue-500 text-white min-w-[140px]"
                 >
-                  Encrypt Ballot
+                  Vote
                 </Button>
               </Card>
             </motion.div>

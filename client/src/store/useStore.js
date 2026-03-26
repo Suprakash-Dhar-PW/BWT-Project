@@ -73,6 +73,7 @@ export const useStore = create((set, get) => ({
         .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => get().syncSystem(true))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => get().syncSystem(true))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, () => get().syncSystem(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => get().syncSystem(true))
         .subscribe()
 
     } catch (e) {

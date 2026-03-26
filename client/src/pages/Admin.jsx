@@ -24,6 +24,9 @@ export default function Admin() {
   const settings = useStore((state) => state.settings);
   const syncSystem = useStore((state) => state.syncSystem);
   const loading = useStore((state) => state.loading);
+  const initialized = useStore((state) => state.initialized);
+
+  if (loading || !initialized) return <PageLoader />;
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(null);
@@ -417,12 +420,16 @@ export default function Admin() {
 
   const nextRole = async () => {
     setActionLoading(true);
-    const currentIndex = positions.findIndex(
-      (p) => p.id === settings.current_position_id,
-    );
-    const nextPos = positions[currentIndex + 1];
-
     try {
+      if (!settings) {
+        throw new Error("Registry settings not synchronized.");
+      }
+
+      const currentIndex = positions.findIndex(
+        (p) => p.id === settings?.current_position_id,
+      );
+      const nextPos = positions[currentIndex + 1];
+
       if (nextPos) {
         await updateSettings({
           status: "VOTING",
@@ -431,6 +438,9 @@ export default function Admin() {
       } else {
         await updateSettings({ status: "FINISHED" });
       }
+    } catch (e) {
+      console.error("Workflow Shift Failure:", e);
+      setErrorMsg(`Workflow Shift Failure: ${e.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -638,14 +648,14 @@ export default function Admin() {
                   <div
                     key={m.id}
                     className={cn(
-                      "p-3 flex items-center justify-between gap-4 transition",
+                      "p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition border-b border-slate-50 last:border-0",
                       isMemberAdmin ? "bg-slate-50/80" : "hover:bg-slate-50/50",
                     )}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div
                         className={cn(
-                          "w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0",
+                          "w-10 h-10 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0",
                           isMemberAdmin
                             ? "bg-slate-900 text-white"
                             : "bg-slate-100 text-slate-500",
@@ -653,132 +663,136 @@ export default function Admin() {
                       >
                         {m.name.charAt(0)}
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-slate-900 leading-none truncate">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                          <p className="text-sm font-bold text-slate-900 leading-none truncate">
                             {m.name}
                           </p>
-                          {isMemberAdmin && (
-                            <Badge
-                              variant="blue"
-                              size="xs"
-                              className="text-[7px] py-0 px-1 opacity-70"
-                            >
-                              ADMIN
-                            </Badge>
-                          )}
-                          {getWinnerRole(m.id) && (
-                            <Badge
-                              variant="success"
-                              size="xs"
-                              className="text-[7px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-100 font-bold"
-                            >
-                              ELECTED: {getWinnerRole(m.id)}
-                            </Badge>
-                          )}
+                          <div className="flex gap-1">
+                            {isMemberAdmin && (
+                              <Badge
+                                variant="blue"
+                                size="xs"
+                                className="text-[7px] py-0 px-1 opacity-70"
+                              >
+                                ADMIN
+                              </Badge>
+                            )}
+                            {getWinnerRole(m.id) && (
+                              <Badge
+                                variant="success"
+                                size="xs"
+                                className="text-[7px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-100 font-bold"
+                              >
+                                ELECTED: {getWinnerRole(m.id)}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-500 truncate">
+                        <p className="text-[10px] sm:text-xs text-slate-500 truncate mt-1 sm:mt-0">
                           {m.email}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4 shrink-0 px-2">
-                      <label
-                        className={cn(
-                          "flex flex-col items-center transition-opacity",
-                          isMemberAdmin
-                            ? "opacity-30 cursor-not-allowed"
-                            : "cursor-pointer opacity-90 hover:opacity-100",
-                        )}
-                      >
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                          Voter
-                        </span>
-                        <div className="relative">
-                          <input
-                            disabled={
-                              isMemberAdmin || actionLoading || isVotingActive
-                            }
-                            type="checkbox"
-                            checked={m.is_eligible}
-                            onChange={() => toggleEligible(m)}
-                            className="sr-only peer"
-                          />
-                          <div
-                            className={cn(
-                              "w-7 h-4 rounded-full transition-colors",
-                              m.is_eligible ? "bg-emerald-500" : "bg-slate-200",
-                            )}
-                          />
-                          <div
-                            className={cn(
-                              "absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform",
-                              m.is_eligible && "translate-x-3",
-                            )}
-                          />
-                        </div>
-                      </label>
+                    <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-6 shrink-0 bg-slate-50/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
+                      <div className="flex items-center gap-4">
+                        <label
+                          className={cn(
+                            "flex flex-col items-center transition-opacity min-w-[40px]",
+                            isMemberAdmin
+                              ? "opacity-30 cursor-not-allowed"
+                              : "cursor-pointer opacity-90 hover:opacity-100",
+                          )}
+                        >
+                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                            Voter
+                          </span>
+                          <div className="relative">
+                            <input
+                              disabled={
+                                isMemberAdmin || actionLoading || isVotingActive
+                              }
+                              type="checkbox"
+                              checked={m.is_eligible}
+                              onChange={() => toggleEligible(m)}
+                              className="sr-only peer"
+                            />
+                            <div
+                              className={cn(
+                                "w-8 h-4.5 rounded-full transition-colors",
+                                m.is_eligible ? "bg-emerald-500" : "bg-slate-200",
+                              )}
+                            />
+                            <div
+                              className={cn(
+                                "absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform",
+                                m.is_eligible && "translate-x-3.5",
+                              )}
+                            />
+                          </div>
+                        </label>
 
-                      <div className="w-px h-6 bg-slate-200" />
+                        <div className="w-px h-6 bg-slate-200" />
 
-                      <label
-                        className={cn(
-                          "flex flex-col items-center transition-opacity",
-                          !m.is_eligible || isVotingActive || isWinner
-                            ? "opacity-30 cursor-not-allowed"
-                            : "cursor-pointer opacity-90 hover:opacity-100",
-                        )}
-                        title={
-                          isWinner
-                            ? "Already elected to a role"
-                            : !m.is_eligible
-                              ? "Must be eligible voter"
-                              : ""
-                        }
-                      >
-                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
-                          Nominee
-                        </span>
-                        <div className="relative">
-                          <input
-                            disabled={
-                              isVotingActive || isWinner || !m.is_eligible
-                            }
-                            type="checkbox"
-                            checked={m.is_nominee}
-                            onChange={() =>
-                              updateMember(m.id, { is_nominee: !m.is_nominee })
-                            }
-                            className="sr-only peer"
-                          />
-                          <div
-                            className={cn(
-                              "w-7 h-4 rounded-full transition-colors",
-                              m.is_nominee && m.is_eligible
-                                ? "bg-indigo-500"
-                                : "bg-slate-200",
-                            )}
-                          />
-                          <div
-                            className={cn(
-                              "absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform",
-                              m.is_nominee && m.is_eligible && "translate-x-3",
-                            )}
-                          />
-                        </div>
-                      </label>
+                        <label
+                          className={cn(
+                            "flex flex-col items-center transition-opacity min-w-[42px]",
+                            !m.is_eligible || isVotingActive || isWinner
+                              ? "opacity-30 cursor-not-allowed"
+                              : "cursor-pointer opacity-90 hover:opacity-100",
+                          )}
+                          title={
+                            isWinner
+                              ? "Already elected to a role"
+                              : !m.is_eligible
+                                ? "Must be eligible voter"
+                                : ""
+                          }
+                        >
+                          <span className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                            Nominee
+                          </span>
+                          <div className="relative">
+                            <input
+                              disabled={
+                                isVotingActive || isWinner || !m.is_eligible
+                              }
+                              type="checkbox"
+                              checked={m.is_nominee}
+                              onChange={() =>
+                                updateMember(m.id, { is_nominee: !m.is_nominee })
+                              }
+                              className="sr-only peer"
+                            />
+                            <div
+                              className={cn(
+                                "w-8 h-4.5 rounded-full transition-colors",
+                                m.is_nominee && m.is_eligible
+                                  ? "bg-indigo-500"
+                                  : "bg-slate-200",
+                              )}
+                            />
+                            <div
+                              className={cn(
+                                "absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform",
+                                m.is_nominee && m.is_eligible && "translate-x-3.5",
+                              )}
+                            />
+                          </div>
+                        </label>
+                      </div>
 
-                      <div className="w-px h-6 bg-slate-200" />
+                      <div className="w-px h-6 bg-slate-200 hidden sm:block" />
 
                       <button
                         disabled={isVotingActive}
                         onClick={() =>
                           setShowConfirmModal({ id: m.id, name: m.name })
                         }
-                        className="p-1.5 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-20"
+                        className="p-2 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-20 hover:bg-red-50 rounded-lg"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4.5 h-4.5" />
                       </button>
                     </div>
                   </div>
