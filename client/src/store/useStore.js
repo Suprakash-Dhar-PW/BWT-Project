@@ -15,7 +15,7 @@ export const useStore = create((set, get) => ({
 
   // Global Sync Engine
   syncSystem: async (silent = true) => {
-    if (!silent) set({ loading: true })
+    if (!silent && !get().initialized) set({ loading: true })
     try {
       const [memRes, posRes, setRes, voteRes] = await Promise.all([
         supabase.from('members').select('*').order('name'),

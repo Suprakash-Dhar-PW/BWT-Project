@@ -72,9 +72,23 @@ export default function Admin() {
     );
   }, [members]);
 
+  const isVotingActive = settings?.status === "VOTING";
+
+  const filteredMembers = useMemo(() => {
+    return validMembers.filter(
+      (m) =>
+        m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        m.email.toLowerCase().includes(searchTerm.toLowerCase()),
+    );
+  }, [validMembers, searchTerm]);
+
   useEffect(() => {
-    if (members.length === 0) syncSystem(false);
-  }, []);
+    if (!initialized) {
+      syncSystem(false);
+    } else if (members.length === 0) {
+      syncSystem(true);
+    }
+  }, [initialized, members.length]);
 
   const addMember = async (e) => {
     e.preventDefault();
@@ -446,11 +460,6 @@ export default function Admin() {
     }
   };
 
-  const filteredMembers = validMembers.filter((m) =>
-    m.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  const isVotingActive = settings?.status === "VOTING";
-
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-20 mt-8 font-sans">
       {errorMsg && (
@@ -695,104 +704,67 @@ export default function Admin() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-6 shrink-0 bg-slate-50/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
-                      <div className="flex items-center gap-4">
-                        <label
-                          className={cn(
-                            "flex flex-col items-center transition-opacity min-w-[40px]",
-                            isMemberAdmin
-                              ? "opacity-30 cursor-not-allowed"
-                              : "cursor-pointer opacity-90 hover:opacity-100",
-                          )}
-                        >
-                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                    <div className="flex items-center justify-between sm:justify-end gap-6 shrink-0 bg-slate-50/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
+                      <div className="flex items-center gap-4 sm:gap-6">
+                        {/* Voter Toggle */}
+                        <div className="flex flex-col items-center">
+                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
                             Voter
                           </span>
-                          <div className="relative">
-                            <input
-                              disabled={
-                                isMemberAdmin || actionLoading || isVotingActive
-                              }
-                              type="checkbox"
-                              checked={m.is_eligible}
-                              onChange={() => toggleEligible(m)}
-                              className="sr-only peer"
-                            />
-                            <div
+                          <button
+                            disabled={isMemberAdmin || actionLoading || isVotingActive}
+                            onClick={() => toggleEligible(m)}
+                            className={cn(
+                              "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+                              m.is_eligible ? "bg-emerald-500" : "bg-slate-200",
+                              (isMemberAdmin || actionLoading || isVotingActive) && "opacity-40 cursor-not-allowed"
+                            )}
+                          >
+                            <span
                               className={cn(
-                                "w-8 h-4.5 rounded-full transition-colors",
-                                m.is_eligible ? "bg-emerald-500" : "bg-slate-200",
+                                "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                m.is_eligible ? "translate-x-5" : "translate-x-0"
                               )}
                             />
-                            <div
-                              className={cn(
-                                "absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform",
-                                m.is_eligible && "translate-x-3.5",
-                              )}
-                            />
-                          </div>
-                        </label>
+                          </button>
+                        </div>
 
-                        <div className="w-px h-6 bg-slate-200" />
+                        <div className="w-px h-8 bg-slate-200" />
 
-                        <label
-                          className={cn(
-                            "flex flex-col items-center transition-opacity min-w-[42px]",
-                            !m.is_eligible || isVotingActive || isWinner
-                              ? "opacity-30 cursor-not-allowed"
-                              : "cursor-pointer opacity-90 hover:opacity-100",
-                          )}
-                          title={
-                            isWinner
-                              ? "Already elected to a role"
-                              : !m.is_eligible
-                                ? "Must be eligible voter"
-                                : ""
-                          }
-                        >
-                          <span className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                        {/* Nominee Toggle */}
+                        <div className="flex flex-col items-center">
+                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
                             Nominee
                           </span>
-                          <div className="relative">
-                            <input
-                              disabled={
-                                isVotingActive || isWinner || !m.is_eligible
-                              }
-                              type="checkbox"
-                              checked={m.is_nominee}
-                              onChange={() =>
-                                updateMember(m.id, { is_nominee: !m.is_nominee })
-                              }
-                              className="sr-only peer"
-                            />
-                            <div
+                          <button
+                            disabled={isVotingActive || isWinner || !m.is_eligible}
+                            onClick={() => updateMember(m.id, { is_nominee: !m.is_nominee })}
+                            className={cn(
+                              "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
+                              m.is_nominee && m.is_eligible ? "bg-indigo-600" : "bg-slate-200",
+                              (isVotingActive || isWinner || !m.is_eligible) && "opacity-40 cursor-not-allowed"
+                            )}
+                          >
+                            <span
                               className={cn(
-                                "w-8 h-4.5 rounded-full transition-colors",
-                                m.is_nominee && m.is_eligible
-                                  ? "bg-indigo-500"
-                                  : "bg-slate-200",
+                                "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                m.is_nominee && m.is_eligible ? "translate-x-5" : "translate-x-0"
                               )}
                             />
-                            <div
-                              className={cn(
-                                "absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform",
-                                m.is_nominee && m.is_eligible && "translate-x-3.5",
-                              )}
-                            />
-                          </div>
-                        </label>
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="w-px h-6 bg-slate-200 hidden sm:block" />
+                      <div className="w-px h-8 bg-slate-200 hidden sm:block" />
 
                       <button
                         disabled={isVotingActive}
                         onClick={() =>
                           setShowConfirmModal({ id: m.id, name: m.name })
                         }
-                        className="p-2 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-20 hover:bg-red-50 rounded-lg"
+                        className="p-2 text-slate-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-lg"
                       >
-                        <Trash2 className="w-4.5 h-4.5" />
+                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
                   </div>
