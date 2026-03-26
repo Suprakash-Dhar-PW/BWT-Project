@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useStore } from './store/useStore'
 import Navbar from './components/Navbar'
 import Login from './pages/Login'
@@ -28,7 +28,7 @@ export default function App() {
   }, [init])
 
   return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <Router>
       <div className="min-h-screen bg-gray-50 text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-900">
         <Navbar />
         <main className="container mx-auto px-4 py-8">

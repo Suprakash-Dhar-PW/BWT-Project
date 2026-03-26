@@ -110,15 +110,34 @@ export const useStore = create((set, get) => ({
   },
 
   signIn: async (email) => {
-    // Force OTP email delivery without redirect dependency
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: null // DISABLE redirect link usage, force manual token entry
+    try {
+      const trimmedEmail = email.toLowerCase().trim()
+      
+      // 1. Registry Verification: Ensure the email is part of the authorized BWT pool
+      const { data: member, error: checkError } = await supabase
+        .from('members')
+        .select('id')
+        .eq('email', trimmedEmail)
+        .maybeSingle()
+
+      if (checkError || !member) {
+        throw new Error("IDENTIFIER REJECTED: You are not registered in the BWT pool. Please contact an Administrator.")
       }
-    })
-    return { error }
+
+      // 2. Trigger OTP with auto-provisioning enabled
+      const { error } = await supabase.auth.signInWithOtp({
+        email: trimmedEmail,
+        options: {
+          shouldCreateUser: true, // Required for the first login of an added member
+          emailRedirectTo: window.location.origin
+        }
+      })
+      if (error) throw error
+      return { error: null }
+    } catch (e) {
+      console.error("Auth Transmission Error:", e.message)
+      return { error: e }
+    }
   },
 
   verifyOtp: async (email, token) => {

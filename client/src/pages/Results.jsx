@@ -138,7 +138,7 @@ export default function Results() {
                   <div className="space-y-2">
                     {pos.candidates.length > 0 ? pos.candidates.map((c, i) => {
                       const percentage = pos.totalVotes > 0 ? (c.votes / pos.totalVotes) * 100 : 0
-                      const isWinner = pos.winner_id === c.id || (isRevealed && i === 0 && c.votes > 0)
+                      const isWinner = pos.winner_id === c.id;
 
                       return (
                         <div key={c.id} className={cn(
@@ -160,8 +160,13 @@ export default function Results() {
                                    <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest border border-amber-200 flex items-center gap-1">
                                      <Trophy className="w-2.5 h-2.5" /> Winner
                                    </span>
-                                 )}
-                               </div>
+                                  )}
+                                  {isWinner && pos.decided_by_admin && (
+                                     <Badge variant="blue" size="xs" className="text-[7px] py-0 px-1 border-blue-200 bg-blue-50 text-blue-600 font-black">
+                                       Decided by Admin
+                                     </Badge>
+                                  )}
+                                </div>
                             </div>
                             <div className="text-right shrink-0">
                                <p className="text-[10px] font-black text-slate-900">{c.votes} <span className="text-slate-400 text-[8px] tracking-widest">{c.votes === 1 ? 'VOTE' : 'VOTES'}</span></p>
