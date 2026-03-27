@@ -17,6 +17,7 @@ export const useStore = create((set, get) => ({
   syncSystem: async (silent = true) => {
     if (!silent && !get().initialized) set({ loading: true })
     try {
+      const { data: { user: updatedUser } } = await supabase.auth.getUser()
       const [memRes, posRes, setRes, voteRes] = await Promise.all([
         supabase.from('members').select('*').order('name'),
         supabase.from('positions').select('*').order('order'),
@@ -24,17 +25,18 @@ export const useStore = create((set, get) => ({
         supabase.from('votes').select('*')
       ])
 
-      const currentUser = get().user
       const currentMember = memRes.data?.find(
-        (m) => m.email.toLowerCase() === currentUser?.email?.toLowerCase()
+        (m) => m.email.toLowerCase() === updatedUser?.email?.toLowerCase()
       )
 
       set({ 
+        user: updatedUser || null,
         members: memRes.data || [],
         positions: posRes.data || [],
         settings: setRes.data || null,
         votes: voteRes.data || [],
-        memberData: currentMember || get().memberData
+        memberData: currentMember || null,
+        initialized: true
       })
     } catch (e) {
       console.error("System Sync Failure:", e)

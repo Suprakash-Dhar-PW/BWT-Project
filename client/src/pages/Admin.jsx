@@ -202,20 +202,20 @@ export default function Admin() {
       const currentAdmin = members.find((m) => m.is_admin);
       if (!currentAdmin) throw new Error("Admin session integrity fault.");
 
-      // Atomic transfer protocol
-      const { error: oldAdminErr } = await supabase
-        .from("members")
-        .update({ is_admin: false })
-        .eq("id", currentAdmin.id);
-      if (oldAdminErr) throw oldAdminErr;
+      // Atomic Single-Transaction Protocol (RPC)
+      // This prevents the race condition where the current admin loses permissions 
+      // before they can grant them to the new admin.
+      const { error: transferErr } = await supabase.rpc("transfer_admin_role", {
+        old_admin_email: currentAdmin.email,
+        new_admin_email: newAdmin.email,
+      });
 
-      const { error: newAdminErr } = await supabase
-        .from("members")
-        .update({ is_admin: true })
-        .eq("id", newAdmin.id);
-      if (newAdminErr) throw newAdminErr;
+      if (transferErr) throw transferErr;
 
+      // Global store sync following the protocol update
       await syncSystem(true);
+      
+      console.log("Atomic Transfer Complete. New registry state:", useStore.getState().members);
       alert("Protocol Success: Admin Control Handover Completed.");
     } catch (e) {
       console.error("Transfer Halt:", e);
