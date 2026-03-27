@@ -15,9 +15,14 @@ export const useStore = create((set, get) => ({
 
   // Global Sync Engine
   syncSystem: async (silent = true) => {
-    if (!silent && !get().initialized) set({ loading: true })
+    // Only set loading if not silent
+    if (!silent) set({ loading: true })
+    
     try {
-      const { data: { user: updatedUser } } = await supabase.auth.getUser()
+      // 1. Refresh Auth Context
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
+      
+      // 2. Parallel Core Persistence Taps
       const [memRes, posRes, setRes, voteRes] = await Promise.all([
         supabase.from('members').select('*').order('name'),
         supabase.from('positions').select('*').order('order'),
@@ -25,23 +30,33 @@ export const useStore = create((set, get) => ({
         supabase.from('votes').select('*')
       ])
 
+      // 3. Registry Identity Mapping
       const currentMember = memRes.data?.find(
-        (m) => m.email.toLowerCase() === updatedUser?.email?.toLowerCase()
+        (m) => m.email.toLowerCase() === currentUser?.email?.toLowerCase()
       )
 
+      // 4. Atomic Pulse Update
       set({ 
-        user: updatedUser || null,
+        user: currentUser || null,
+        memberData: currentMember || null,
         members: memRes.data || [],
         positions: posRes.data || [],
         settings: setRes.data || null,
         votes: voteRes.data || [],
-        memberData: currentMember || null,
         initialized: true
       })
+      
+      console.log("Transmission Synchronized.", { 
+        admin: currentMember?.is_admin,
+        votes: voteRes.data?.length 
+      })
+
     } catch (e) {
-      console.error("System Sync Failure:", e)
+      console.error("Critical Transmission Fault:", e)
+      // Ensure we don't freeze the app on network errors
+      set({ initialized: true })
     } finally {
-      if (!silent) set({ loading: false })
+      set({ loading: false })
     }
   },
 
@@ -168,5 +183,20 @@ export const useStore = create((set, get) => ({
   signOut: async () => {
     await supabase.auth.signOut()
     set({ user: null, memberData: null })
+  },
+
+  updateSettings: async (updates) => {
+    const { settings } = get()
+    if (!settings?.id) return { error: new Error("Settings not loaded") }
+
+    const { error } = await supabase
+      .from('settings')
+      .update(updates)
+      .eq('id', settings.id)
+    
+    if (!error) {
+      await get().syncSystem(true)
+    }
+    return { error }
   }
 }))

@@ -28,7 +28,7 @@ export default function App() {
   }, [init])
 
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="min-h-screen bg-gray-50 text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-900">
         <Navbar />
         <main className="container mx-auto px-4 py-8">

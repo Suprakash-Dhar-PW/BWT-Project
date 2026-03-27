@@ -33,13 +33,16 @@ export default function Voting() {
   const candidates = useMemo(() => {
     if (!currentPos || !members || !positions) return []
     
+    // 2. Identify the current progression index
     const currentIndex = positions.findIndex(p => p.id === currentPos.id)
     const previousWinners = positions.slice(0, currentIndex).map(p => p.winner_id).filter(Boolean)
     
+    // 2. Filter Pool: Only show active nominees who haven't won a previous round
     return members.filter(m => 
       !m.is_admin && 
       m.is_nominee && 
-      !previousWinners.includes(m.id)
+      !m.eliminated && // Explicit Elimination Flag
+      !previousWinners.includes(m.id) // Cross-reference Backup
     )
   }, [currentPos, members, positions])
 

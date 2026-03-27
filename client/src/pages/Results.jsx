@@ -27,34 +27,45 @@ export default function Results() {
     if (!positions || !settings) return []
 
     return positions.map((p, idx) => {
-      // 1. Identify winners of previous positions to exclude them
+      // 1. Contextual Pool Identification
+      // We exclude winners from ALL earlier rounds from this specific round's result view
       const previousWinners = positions
         .slice(0, idx)
         .map(prev => prev.winner_id)
-        .filter(Boolean)
+        .filter(Boolean);
 
-      // 2. Build candidate list from global member registry
-      const candidates = members
-        .filter(m => !m.is_admin && !previousWinners.includes(m.id))
-        .filter(m => m.is_nominee || p.winner_id === m.id)
-        .map(member => {
-          const voteCount = votes.filter(v => 
-            v.nominee_id === member.id && v.position_id === p.id
-          ).length
+      const positionVotes = votes.filter(v => v.position_id === p.id)
+      
+      // 2. Derive Candidate Pool for this specific position
+      // A member is included if:
+      // a) They received a vote for this position
+      // b) OR they are the winner of this position
+      // AND c) They were NOT a winner of a PREVIOUS position
+      const candidateIds = Array.from(new Set([
+        ...positionVotes.map(v => v.nominee_id),
+        ...(p.winner_id ? [p.winner_id] : [])
+      ]))
+      .filter(id => id && !previousWinners.includes(id))
 
+      // 3. Map to Data Objects
+      const candidates = candidateIds
+        .map(id => {
+          const member = members.find(m => m.id === id)
+          const voteCount = positionVotes.filter(v => v.nominee_id === id).length
+          
           return {
-            id: member.id,
-            name: member.name,
+            id: id,
+            name: member ? member.name : "Unknown Identity",
             votes: voteCount
           }
         })
         .sort((a,b) => b.votes - a.votes)
 
-      const totalPositionVotes = candidates.reduce((sum, c) => sum + c.votes, 0)
+      const totalPositionVotes = positionVotes.length
       
-      // 3. Status derivation
+      // 4. Status derivation
       const currentPosOrder = positions.find(pos => pos.id === settings.current_position_id)?.order || 0
-      const isCompleted = p.winner_id !== null || p.order < currentPosOrder
+      const isCompleted = p.winner_id !== null || (settings.status === 'FINISHED') || (p.order < currentPosOrder)
       const status = isCompleted ? 'COMPLETED' : (settings.current_position_id === p.id ? settings.status : 'PENDING')
 
       return {
