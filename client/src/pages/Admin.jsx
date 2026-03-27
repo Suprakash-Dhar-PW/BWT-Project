@@ -188,6 +188,43 @@ export default function Admin() {
     await updateMember(m.id, updates);
   };
 
+  const transferAdmin = async (newAdmin) => {
+    if (
+      !confirm(
+        `ARE YOU SURE? \n\nYou are about to transfer Admin Control to ${newAdmin.name} (${newAdmin.email}). \n\nYOU WILL LOSE ACCESS to this panel immediately.`,
+      )
+    )
+      return;
+
+    setActionLoading(true);
+    setErrorMsg("");
+    try {
+      const currentAdmin = members.find((m) => m.is_admin);
+      if (!currentAdmin) throw new Error("Admin session integrity fault.");
+
+      // Atomic transfer protocol
+      const { error: oldAdminErr } = await supabase
+        .from("members")
+        .update({ is_admin: false })
+        .eq("id", currentAdmin.id);
+      if (oldAdminErr) throw oldAdminErr;
+
+      const { error: newAdminErr } = await supabase
+        .from("members")
+        .update({ is_admin: true })
+        .eq("id", newAdmin.id);
+      if (newAdminErr) throw newAdminErr;
+
+      await syncSystem(true);
+      alert("Protocol Success: Admin Control Handover Completed.");
+    } catch (e) {
+      console.error("Transfer Halt:", e);
+      setErrorMsg(`Transfer Protocol Fault: ${e.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const deleteMember = async (id) => {
     setActionLoading(true);
     setErrorMsg("");
@@ -756,6 +793,17 @@ export default function Admin() {
                       </div>
 
                       <div className="w-px h-8 bg-slate-200 hidden sm:block" />
+
+                      {!isMemberAdmin && !isWinner && (
+                        <button
+                          disabled={isVotingActive || actionLoading}
+                          onClick={() => transferAdmin(m)}
+                          className="p-2 text-slate-400 hover:text-indigo-600 transition-all hover:bg-indigo-50 rounded-lg group"
+                          title="Transfer Admin Access"
+                        >
+                          <Shield className="w-5 h-5 group-hover:fill-indigo-500" />
+                        </button>
+                      )}
 
                       <button
                         disabled={isVotingActive}

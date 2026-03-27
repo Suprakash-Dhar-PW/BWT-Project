@@ -24,11 +24,17 @@ export const useStore = create((set, get) => ({
         supabase.from('votes').select('*')
       ])
 
+      const currentUser = get().user
+      const currentMember = memRes.data?.find(
+        (m) => m.email.toLowerCase() === currentUser?.email?.toLowerCase()
+      )
+
       set({ 
         members: memRes.data || [],
         positions: posRes.data || [],
         settings: setRes.data || null,
-        votes: voteRes.data || []
+        votes: voteRes.data || [],
+        memberData: currentMember || get().memberData
       })
     } catch (e) {
       console.error("System Sync Failure:", e)
