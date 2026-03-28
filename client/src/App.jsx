@@ -27,6 +27,11 @@ export default function App() {
 
   useEffect(() => {
     init()
+
+    // STEP 8: Global Error Logging
+    window.onerror = function (msg, url, line, col, error) {
+      console.error("Global error:", msg, { url, line, col, error })
+    }
     
     // 🔥 LIVE PROTOCOL: GLOBAL REAL-TIME SUBSCRIPTION
     const channel = supabase.channel('live-election')

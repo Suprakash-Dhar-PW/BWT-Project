@@ -8,6 +8,7 @@ export default function Button({
   icon: Icon, 
   loading = false, 
   disabled = false, 
+  fullWidth = false,
   className, 
   ...props 
 }) {
@@ -28,7 +29,8 @@ export default function Button({
     <button
       disabled={loading || disabled}
       className={cn(
-        'inline-flex items-center justify-center font-black uppercase tracking-widest transition-all rounded-xl disabled:opacity-50',
+        'inline-flex items-center justify-center font-black uppercase tracking-widest transition-all rounded-xl disabled:opacity-50 overflow-hidden',
+        fullWidth && 'w-full',
         variants[variant],
         sizes[size],
         className

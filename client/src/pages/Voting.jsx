@@ -162,26 +162,30 @@ export default function Voting() {
   )
 
   if (hasVoted) return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh]">
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-        <Card className="max-w-xl text-center p-16 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-50/50 via-white to-white" hover={false}>
-           <div className="mx-auto w-24 h-24 bg-blue-600 text-white rounded-[2.5rem] flex items-center justify-center mb-10 shadow-xl shadow-blue-100 transition-transform hover:scale-110">
-              <ShieldCheck className="w-12 h-12" />
+    <div className="flex flex-col items-center justify-center min-h-[70vh] px-4 py-8">
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }} 
+        animate={{ scale: 1, opacity: 1 }}
+        className="w-full max-w-lg mx-auto"
+      >
+        <Card className="text-center p-8 sm:p-12 md:p-16 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-50/50 via-white to-white border-blue-50/50 shadow-2xl shadow-blue-50/20" hover={false}>
+           <div className="mx-auto w-20 h-20 sm:w-24 sm:h-24 bg-blue-600 text-white rounded-[2rem] sm:rounded-[2.5rem] flex items-center justify-center mb-8 sm:mb-10 shadow-xl shadow-blue-100 transition-transform hover:scale-110">
+              <ShieldCheck className="w-10 h-10 sm:w-12 sm:h-12" />
            </div>
            <Badge variant="blue" className="mb-6">Ballot Synchronized</Badge>
-           <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase leading-none mb-6">Vote Recorded</h2>
-           <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-sm mx-auto mb-10">
+           <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 tracking-tighter uppercase leading-[0.9] mb-6">Vote <br className="sm:hidden" /> Recorded</h2>
+           <p className="text-slate-500 text-base sm:text-lg font-medium leading-relaxed max-w-xs sm:max-w-sm mx-auto mb-8 sm:mb-10">
              Your secure encrypted transmission for <span className="text-blue-600 font-bold">{currentPos?.name}</span> has been finalized.
            </p>
-           <div className="p-8 bg-slate-50 border border-slate-100 rounded-3xl">
-              <p className="text-sm font-bold text-slate-800 uppercase tracking-tight mb-2">Your vote has been recorded successfully.</p>
-              <p className="text-xs text-slate-500 font-medium tracking-wide">
-                To check the results you can visit the{" "}
+           <div className="p-6 sm:p-8 bg-slate-50/80 border border-slate-100 rounded-2xl sm:rounded-3xl backdrop-blur-sm">
+              <p className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-tight mb-2">Your vote has been recorded successfully.</p>
+              <p className="text-[10px] sm:text-xs text-slate-500 font-medium tracking-wide leading-relaxed">
+                To check the current standing you can visit the{" "}
                 <button 
                   onClick={() => navigate("/results")} 
-                  className="text-orange-500 hover:underline cursor-pointer font-black transition-all"
+                  className="text-blue-600 hover:text-blue-500 underline decoration-blue-200 underline-offset-4 cursor-pointer font-black transition-all"
                 >
-                  Standings
+                  Results Standings
                 </button>{" "}
                 section.
               </p>
@@ -192,8 +196,8 @@ export default function Voting() {
   )
 
   return (
-    <div className="space-y-12 pb-20">
-      <div className="text-center max-w-3xl mx-auto">
+    <div className="w-full max-w-5xl mx-auto space-y-12 pb-20">
+      <div className="text-center max-w-3xl mx-auto px-4">
         <Badge variant="blue" className="mb-6" icon={Vote}>Active Ballot Cycle: {currentPos?.name}</Badge>
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-slate-900 tracking-tighter uppercase mb-6 leading-[0.9]">
           Cast Your <br/>
@@ -201,7 +205,7 @@ export default function Voting() {
         </h1>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 px-4">
         <AnimatePresence mode="popLayout">
           {candidates.map((c, i) => (
             <CandidateCard
@@ -217,7 +221,7 @@ export default function Voting() {
 
       <motion.div 
         layout
-        className="fixed bottom-12 left-0 right-0 p-4 z-50 pointer-events-none flex justify-center"
+        className="fixed bottom-8 sm:bottom-12 left-0 right-0 p-4 z-50 pointer-events-none flex justify-center"
       >
         <AnimatePresence>
           {selectedCandidate && (
@@ -225,18 +229,18 @@ export default function Voting() {
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="pointer-events-auto w-full max-w-md"
+              className="pointer-events-auto w-full max-w-sm sm:max-w-md"
             >
-              <Card className="bg-slate-900 border border-slate-800 p-6 flex items-center justify-between gap-6 shadow-2xl" hover={false}>
-                <div className="flex-1">
+              <Card className="bg-slate-900/95 border border-slate-700/50 p-5 sm:p-6 flex items-center justify-between gap-4 sm:gap-6 shadow-2xl backdrop-blur-md" hover={false}>
+                <div className="flex-1 min-w-0">
                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest leading-none mb-1">Target Persona</p>
-                   <h4 className="text-white font-black uppercase text-xl truncate">{candidates.find(c => c.id === selectedCandidate)?.name}</h4>
+                   <h4 className="text-white font-black uppercase text-lg sm:text-xl truncate">{candidates.find(c => c.id === selectedCandidate)?.name}</h4>
                 </div>
                 <Button 
                   onClick={submitVote} 
                   loading={submitting} 
                   size="lg"
-                  className="bg-blue-600 hover:bg-blue-500 text-white min-w-[140px]"
+                  className="bg-blue-600 hover:bg-blue-500 text-white min-w-[100px] sm:min-w-[140px] h-12 text-sm uppercase tracking-wider font-bold"
                 >
                   Vote
                 </Button>

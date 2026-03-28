@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, memo, useCallback, startTransition } from "react";
+import React, { useEffect, useState, useMemo, memo, useCallback, startTransition, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useStore } from "../store/useStore";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,12 +12,14 @@ import {
   Check,
   X,
   AlertTriangle,
-  RefreshCw,
-  Hash,
-  CheckCircle2,
-} from "lucide-react";
-import Badge from "../components/Badge";
-import AlertModal from "../components/AlertModal";
+   RefreshCw,
+   Hash,
+   CheckCircle2,
+   UserPlus,
+ } from "lucide-react";
+ import Badge from "../components/Badge";
+ import AlertModal from "../components/AlertModal";
+ import Button from "../components/Button";
 import { cn } from "../lib/utils";
 import PageLoader from "../components/PageLoader";
 
@@ -37,11 +39,15 @@ export default function Admin() {
   const [modalTally, setModalTally] = useState({});
   const [manualSelection, setManualSelection] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(null);
+  const [isAdding, setIsAdding] = useState(false); // Local state for add form
   const [actionLoading, setActionLoading] = useState(false); // Global panel state
   const [pendingId, setPendingId] = useState(null); // Individual button tracker
   const [errorMsg, setErrorMsg] = useState("");
   const [localLoadingMap, setLocalLoadingMap] = useState({});
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [prevNomineeCount, setPrevNomineeCount] = useState(0); // FIX 5: Track nomad count
+  const isSubmittingRef = useRef(false);
 
 
   // 2. Data Persistence Layer
@@ -157,60 +163,83 @@ export default function Admin() {
     );
   }, [validMembers, searchTerm]);
 
+  // Data reconciliation handled globally via App.jsx Realtime Subscriptions.
+  // This avoids redundant fetch cycles during local state updates.
   useEffect(() => {
     if (!initialized) {
       syncSystem(false);
-    } else if (members.length === 0) {
-      syncSystem(true);
     }
-  }, [initialized, members.length]);
+  }, [initialized]);
 
-  const addMember = async (e) => {
+  const handleAddMember = async (e) => {
     e.preventDefault();
-    const { name, email } = e.target.elements;
-    const trimmedEmail = email.value.trim().toLowerCase();
+    if (!name || !email || isAdding) return;
 
-    if (members.some((m) => m.email === trimmedEmail)) {
-      return setErrorMsg("Registry Identity Error: User already exists.");
-    }
+    // RULE: Prevent duplicate submissions (Strict Mode / Rapid Clicks)
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
 
-    const newMemberPlaceholder = {
-      id: "placeholder-" + Date.now(),
-      name: name.value.trim(),
-      email: trimmedEmail,
-      is_admin: false,
-      is_eligible: true,
-      is_nominee: false,
-    };
+    const trimmedEmail = email.trim().toLowerCase();
+    const candidateName = name.trim();
 
-    // Optimistic Update
-    const originalMembers = [...members];
-    useStore.setState({ members: [newMemberPlaceholder, ...members] });
-
-    setActionLoading(true);
+    // 1. Initial State UI Lock
+    setIsAdding(true);
     setErrorMsg("");
-    try {
-      const { error } = await supabase.from("members").insert([
-        {
-          name: newMemberPlaceholder.name,
-          email: newMemberPlaceholder.email,
-          is_admin: false,
-          is_eligible: true,
-          is_nominee: false,
-        },
-      ]);
-      if (error) throw error;
+    console.time("PERSISTENCE_LATENCY");
 
-      e.target.reset();
-      console.log("New member registered successfully.");
-      await refetchData();
-    } catch (e) {
-      // Rollback
-      useStore.setState({ members: originalMembers });
-      console.error("Member Registration Error:", e);
-      setErrorMsg(`Registry Fault: ${e.message}`);
+    let timeoutId = null;
+
+    try {
+      // 1. Pre-fetch Integrity Filter
+      const exists = members.find(m => m.email.toLowerCase() === trimmedEmail);
+      if (exists) {
+        throw new Error("Identity already present in central registry.");
+      }
+
+      console.log("[REGISTRY] Firing persistence trigger...");
+
+      // 2. Direct Persistence Task (No timeout for verification)
+      const { data: insertResult, error: insertError } = await supabase
+        .from("members")
+        .insert([
+          {
+            name: candidateName,
+            email: trimmedEmail,
+            is_admin: false,
+            is_eligible: true,
+            is_nominee: false,
+          },
+        ])
+        .select()
+        .single();
+
+      // DEBUG: Log Raw Identity Sync Response
+      console.log("[DEBUG] Supabase Insert Result:", insertResult);
+      if (insertError) {
+        console.error("[DEBUG] Supabase Insert Error:", insertError);
+        throw insertError;
+      }
+
+      console.log("[REGISTRY] Identity confirmed.");
+
+      // 4. Optimistic UI Injection (Direct Object)
+      if (insertResult) {
+        useStore.setState((state) => ({
+          members: [...state.members, insertResult]
+        }));
+      }
+
+      // 5. Form Refresh
+      setName("");
+      setEmail("");
+
+    } catch (err) {
+      console.error("[REGISTRY FAULT]", err);
+      setErrorMsg(err.message || "Failed to finalize enrollment.");
     } finally {
-      setActionLoading(false);
+      setIsAdding(false);
+      isSubmittingRef.current = false;
+      console.timeEnd("PERSISTENCE_LATENCY");
     }
   };
 
@@ -478,6 +507,7 @@ export default function Admin() {
         useStore.setState({ settings: { ...settings, ...updates } });
     });
 
+    setActionLoading(true);
     try {
       const { error: updateErr } = await supabase
         .from("settings")
@@ -493,6 +523,8 @@ export default function Admin() {
       });
       console.error("Control Fault:", e);
       setErrorMsg(`Control Fault: ${e.message}`);
+    } finally {
+      setActionLoading(false);
     }
   }, [settings, syncSystem]);
 
@@ -684,7 +716,7 @@ export default function Admin() {
 
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-20 mt-8 font-sans">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 mt-8 font-sans">
       {errorMsg && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-between">
           <span>{errorMsg}</span>
@@ -703,35 +735,42 @@ export default function Admin() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="lg:col-span-1 space-y-6">
           <div className="border border-slate-200 rounded-lg p-4 bg-white shadow-sm">
             <h2 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-3">
               Add BWT Member
             </h2>
-            <form onSubmit={addMember} className="space-y-2">
+            <form onSubmit={handleAddMember} className="space-y-3">
               <input
-                disabled={actionLoading}
+                disabled={isAdding}
                 name="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 placeholder="Full Name"
                 required
-                className="w-full h-8 bg-slate-50 border border-slate-200 px-3 rounded text-xs text-slate-900 focus:outline-none focus:border-slate-400 placeholder:text-slate-400 disabled:opacity-50"
+                className="w-full h-10 bg-slate-50 border border-slate-200 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 disabled:opacity-50 transition-all"
               />
               <input
-                disabled={actionLoading}
+                disabled={isAdding}
                 name="email"
                 type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email Address"
                 required
-                className="w-full h-8 bg-slate-50 border border-slate-200 px-3 rounded text-xs text-slate-900 focus:outline-none focus:border-slate-400 placeholder:text-slate-400 disabled:opacity-50"
+                className="w-full h-10 bg-slate-50 border border-slate-200 px-3 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 disabled:opacity-50 transition-all"
               />
-              <button
-                disabled={actionLoading}
-                type="submit"
-                className="w-full h-8 mt-1 bg-slate-900 text-white rounded text-xs font-medium hover:bg-slate-800 transition disabled:opacity-50"
+              <Button 
+                type="submit" 
+                fullWidth 
+                loading={isAdding}
+                disabled={isAdding || !name || !email}
+                icon={isAdding ? undefined : UserPlus}
+                className="rounded-xl h-11 bg-slate-800 hover:bg-slate-900 shadow-lg shadow-slate-200"
               >
-                Add Member
-              </button>
+                {isAdding ? "Adding..." : "Add BWT Member"}
+              </Button>
             </form>
           </div>
 

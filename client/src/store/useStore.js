@@ -12,52 +12,67 @@ export const useStore = create((set, get) => ({
   members: [],
   votes: [],
   initialized: false,
+  syncPromise: null, // Track active sync to prevent concurrency issues
 
   // Global Sync Engine
   syncSystem: async (silent = true) => {
-    // Only set loading if not silent
-    if (!silent) set({ loading: true })
-    
-    try {
-      // 1. Refresh Auth Context
-      const { data: { user: currentUser } } = await supabase.auth.getUser()
+    // Prevent concurrent syncs
+    if (get().syncPromise) return get().syncPromise;
+
+    const syncWork = (async () => {
+      if (!silent) set({ loading: true });
       
-      // 2. Parallel Core Persistence Taps
-      const [memRes, posRes, setRes, voteRes] = await Promise.all([
-        supabase.from('members').select('*').order('name'),
-        supabase.from('positions').select('*').order('order'),
-        supabase.from('settings').select('*').limit(1).maybeSingle(),
-        supabase.from('votes').select('*')
-      ])
+      try {
+        console.log("[SYNC] Starting protocol synchronization...");
+        
+        // 1. Parallel Core Persistence Taps
+        const [memRes, posRes, setRes, voteRes] = await Promise.all([
+          supabase.from('members').select('*').order('name'),
+          supabase.from('positions').select('*').order('order'),
+          supabase.from('settings').select('*').limit(1).maybeSingle(),
+          supabase.from('votes').select('*')
+        ]);
 
-      // 3. Registry Identity Mapping
-      const currentMember = memRes.data?.find(
-        (m) => m.email.toLowerCase() === currentUser?.email?.toLowerCase()
-      )
+        // Check for fetch errors
+        if (memRes.error || posRes.error || setRes.error || voteRes.error) {
+          console.warn("[SYNC] Data retrieval partially failed:", {
+            mem: memRes.error?.message,
+            pos: posRes.error?.message,
+            settings: setRes.error?.message,
+            votes: voteRes.error?.message
+          });
+        }
 
-      // 4. Atomic Pulse Update
-      set({ 
-        user: currentUser || null,
-        memberData: currentMember || null,
-        members: memRes.data || [],
-        positions: posRes.data || [],
-        settings: setRes.data || null,
-        votes: voteRes.data || [],
-        initialized: true
-      })
-      
-      console.log("Transmission Synchronized.", { 
-        admin: currentMember?.is_admin,
-        votes: voteRes.data?.length 
-      })
+        // 2. Refresh Auth Context (Non-blocking if possible)
+        const { data: { user: currentUser } } = await supabase.auth.getUser().catch(() => ({ data: { user: get().user } }));
 
-    } catch (e) {
-      console.error("Critical Transmission Fault:", e)
-      // Ensure we don't freeze the app on network errors
-      set({ initialized: true })
-    } finally {
-      set({ loading: false })
-    }
+        // 3. Registry Identity Mapping
+        const currentMember = memRes.data?.find(
+          (m) => m.email.toLowerCase() === currentUser?.email?.toLowerCase()
+        );
+
+        // 4. Atomic Pulse Update
+        set({ 
+          user: currentUser || get().user,
+          memberData: currentMember || get().memberData,
+          members: memRes.data || get().members,
+          positions: posRes.data || get().positions,
+          settings: setRes.data || get().settings,
+          votes: voteRes.data || get().votes,
+          initialized: true
+        });
+        
+        console.log("[SYNC] Transmission Synchronized.");
+      } catch (e) {
+        console.error("[SYNC] Critical Transmission Fault:", e);
+        set({ initialized: true });
+      } finally {
+        set({ loading: false, syncPromise: null });
+      }
+    })();
+
+    set({ syncPromise: syncWork });
+    return syncWork;
   },
 
   init: async () => {
