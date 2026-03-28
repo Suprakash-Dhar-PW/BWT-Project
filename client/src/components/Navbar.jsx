@@ -34,8 +34,12 @@ export default function Navbar() {
         <div className="flex justify-between items-center h-20">
           
            <Link to="/dashboard" className="flex items-center gap-4 group">
-            <div className="w-14 h-14 bg-white/50 backdrop-blur-sm rounded-2xl flex items-center justify-center p-2 shadow-sm border border-slate-50 transition-all group-hover:shadow-md group-hover:scale-105">
-               <img src={`${import.meta.env.BASE_URL}bwt.png`} alt="BWT Logo" className="w-full h-full object-contain" />
+            <div className="w-14 h-14 bg-white/50 backdrop-blur-sm rounded-2xl flex items-center justify-center p-0 shadow-sm border border-slate-50 transition-all group-hover:shadow-md group-hover:scale-105 overflow-visible">
+               <img 
+                 src={`${import.meta.env.BASE_URL}bwt.png`} 
+                 alt="BWT Logo" 
+                 className="w-full h-full object-contain transform scale-[1.25] brightness-[1.05] contrast-[1.05]" 
+               />
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-black text-slate-900 tracking-tighter uppercase leading-none">BWT</span>

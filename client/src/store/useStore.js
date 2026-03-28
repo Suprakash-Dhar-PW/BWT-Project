@@ -73,37 +73,6 @@ export const useStore = create((set, get) => ({
 
       await get().syncSystem(true);
 
-      // 2. Clear previous subscriptions if any
-      supabase.removeAllChannels();
-
-      // 3. Robust Real-time Subscription Channel
-      const channel = supabase.channel('bwt_realtime_sync')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
-          console.log("Realtime: Settings Revised", payload.new);
-          if (payload.new) set({ settings: payload.new });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, (payload) => {
-          console.log("Realtime: Member Update", payload.eventType);
-          const { members } = get();
-          
-          if (payload.eventType === 'INSERT') {
-            set({ members: [payload.new, ...members] });
-          } else if (payload.eventType === 'UPDATE') {
-            set({ members: members.map(m => m.id === payload.new.id ? payload.new : m) });
-          } else if (payload.eventType === 'DELETE') {
-            set({ members: members.filter(m => m.id === payload.old.id) });
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => get().syncSystem(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, (payload) => {
-           // For votes, we might still want a full sync to keep tallies accurate
-           get().syncSystem(true);
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_decisions' }, () => get().syncSystem(true))
-        .subscribe((status) => {
-          console.log("Realtime Subscription Status:", status);
-        });
-
       // 4. Auth State Listener
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
@@ -111,9 +80,9 @@ export const useStore = create((set, get) => ({
            isInitializing = false;
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
            if (session?.user) {
-              set({ user: session.user });
-              await get().fetchUserData(session.user.email);
-              await get().syncSystem(true);
+             set({ user: session.user });
+             await get().fetchUserData(session.user.email);
+             await get().syncSystem(true);
            }
         }
       });

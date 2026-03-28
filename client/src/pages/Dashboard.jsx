@@ -96,10 +96,15 @@ export default function Dashboard() {
                 {isAdmin ? "Admin Panel Access" : "Voting Hub Platform"}
               </Badge>
             </div>
-            <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter leading-none mb-3">
+            <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter leading-none mb-6">
               Welcome, <span className="text-indigo-400">{memberData.name.split(' ')[0]}</span>
             </h1>
-            <p className="text-slate-400 text-sm font-medium tracking-wide">Secure Voting Dashboard</p>
+            <div className="flex flex-col gap-1">
+               <p className="text-[12px] font-black text-white/40 uppercase tracking-[0.4em] leading-none mb-1">Our Core Mission</p>
+               <h2 className="text-xl md:text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-indigo-600 tracking-[0.1em] uppercase leading-none drop-shadow-sm">
+                 "We assist, Almighty fulfills"
+               </h2>
+            </div>
           </div>
 
           <div className="flex flex-col items-end gap-3">

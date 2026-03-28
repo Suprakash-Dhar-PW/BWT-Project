@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore'
 import { supabase } from '../lib/supabase'
 import { Vote, ShieldCheck, AlertCircle, Calendar } from 'lucide-react'
@@ -18,6 +19,7 @@ export default function Voting() {
   const votes = useStore(state => state.votes)
   const loading = useStore(state => state.loading)
   const syncSystem = useStore(state => state.syncSystem)
+  const navigate = useNavigate()
 
   const [selectedCandidate, setSelectedCandidate] = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -54,20 +56,6 @@ export default function Voting() {
       v.round_number === (settings.round_number || 1)
     )
   }, [voterHash, votes, settings])
-
-  useEffect(() => {
-    // FIX 3: REAL-TIME SYNC FOR VOTING HUB
-    const channel = supabase.channel('bwt_realtime_sync')
-      .on('broadcast', { event: 'UPDATED_ELECTION' }, async ({ payload }) => {
-        console.log("[PROTOCOL] Incoming sync notification detected:", payload);
-        await syncSystem(false);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   useEffect(() => {
     if (user && settings?.current_position_id) {
@@ -182,9 +170,22 @@ export default function Voting() {
            </div>
            <Badge variant="blue" className="mb-6">Ballot Synchronized</Badge>
            <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase leading-none mb-6">Vote Recorded</h2>
-           <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-sm mx-auto">
-             Your secure encrypted transmisson for <span className="text-blue-600 font-bold">{currentPos?.name}</span> has been finalized.
+           <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-sm mx-auto mb-10">
+             Your secure encrypted transmission for <span className="text-blue-600 font-bold">{currentPos?.name}</span> has been finalized.
            </p>
+           <div className="p-8 bg-slate-50 border border-slate-100 rounded-3xl">
+              <p className="text-sm font-bold text-slate-800 uppercase tracking-tight mb-2">Your vote has been recorded successfully.</p>
+              <p className="text-xs text-slate-500 font-medium tracking-wide">
+                To check the results you can visit the{" "}
+                <button 
+                  onClick={() => navigate("/results")} 
+                  className="text-orange-500 hover:underline cursor-pointer font-black transition-all"
+                >
+                  Standings
+                </button>{" "}
+                section.
+              </p>
+           </div>
         </Card>
       </motion.div>
     </div>

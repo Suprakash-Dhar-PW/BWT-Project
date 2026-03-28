@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { supabase } from './lib/supabase'
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useStore } from './store/useStore'
 import Navbar from './components/Navbar'
@@ -22,10 +23,32 @@ function ProtectedRoute({ children, adminOnly = false }) {
 
 export default function App() {
   const init = useStore(state => state.init)
+  const syncSystem = useStore(state => state.syncSystem)
 
   useEffect(() => {
     init()
-  }, [init])
+    
+    // 🔥 LIVE PROTOCOL: GLOBAL REAL-TIME SUBSCRIPTION
+    const channel = supabase.channel('live-election')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
+          console.log("[REALTIME] Settings Sync", payload.new);
+          if (payload.new) useStore.setState({ settings: payload.new });
+          syncSystem(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => {
+          console.log("[REALTIME] Vote Detected");
+          syncSystem(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, () => {
+          console.log("[REALTIME] Registry Update");
+          syncSystem(true);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    }
+  }, [init, syncSystem])
 
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
