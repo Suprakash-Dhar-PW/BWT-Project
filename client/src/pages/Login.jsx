@@ -160,7 +160,7 @@ export default function Login() {
               {/* BRANDING */}
               <div className="mb-10">
                 <img 
-                  src="/bwt.png" 
+                  src={`${import.meta.env.BASE_URL}bwt.png`}
                   alt="BWT LOGO" 
                   className="w-16 h-16 mx-auto mb-6 object-contain filter drop-shadow-sm" 
                 />
@@ -223,38 +223,38 @@ export default function Login() {
             exit={{ opacity: 0, scale: 0.98 }}
             className="w-full max-w-[480px]"
           >
-            <div className="bg-white rounded-[2rem] shadow-[0_12px_48px_-8px_rgba(0,0,0,0.06)] border border-slate-100 p-10 md:p-14 text-center">
+            <div className="bg-white rounded-[3rem] shadow-[0_20px_60px_-15px_rgba(15,23,42,0.1)] border border-slate-100 p-8 md:p-12 relative overflow-hidden text-center">
               
               <button 
                 onClick={() => setStep('email')}
-                className="mb-10 text-[9px] font-black text-slate-300 hover:text-indigo-600 uppercase tracking-widest flex items-center gap-2 transition-colors mx-auto"
+                className="mb-8 text-[10px] font-black text-slate-400 hover:text-indigo-600 uppercase tracking-widest flex items-center gap-2 transition-all mx-auto opacity-70 hover:opacity-100"
               >
-                <ChevronLeft className="w-3 h-3" /> Step Back
+                <ChevronLeft className="w-3.5 h-3.5" /> Step Back
               </button>
 
               <div className="mb-10">
-                <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                  <Hash className="w-6 h-6 text-indigo-500" />
+                <div className="w-20 h-20 bg-indigo-50/50 rounded-[2rem] flex items-center justify-center mx-auto mb-6 border border-indigo-100/50">
+                  <Hash className="w-8 h-8 text-indigo-500" />
                 </div>
-                <h1 className="text-xl font-black text-slate-900 uppercase leading-none mb-2 tracking-tight text-center">
+                <h1 className="text-2xl font-black text-slate-900 uppercase leading-none mb-3 tracking-tight">
                   Identity Verification
                 </h1>
-                <p className="text-xs font-medium text-slate-400 text-center">Passcode en-route to <span className="text-slate-900 font-bold">{email}</span></p>
+                <p className="text-sm font-medium text-slate-400 px-4">Passcode en-route to <br/><span className="text-slate-900 font-bold decoration-indigo-200 underline underline-offset-4">{email}</span></p>
               </div>
 
-              <div className="space-y-10">
+              <div className="space-y-12">
                 {errorMsg && (
                   <motion.div 
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="p-4 bg-rose-50 border border-rose-100 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-3 text-left"
+                    className="p-4 bg-rose-50 border border-rose-100 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-3"
                   >
                     <AlertTriangle className="w-4 h-4 shrink-0" />
                     {errorMsg}
                   </motion.div>
                 )}
 
-                <div className="flex justify-between gap-2 max-w-[340px] mx-auto" onPaste={handlePaste}>
+                <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 md:gap-3 w-full" onPaste={handlePaste}>
                   {token.map((digit, idx) => (
                     <input
                       key={idx}
@@ -266,29 +266,34 @@ export default function Login() {
                       onKeyDown={(e) => handleKeyDown(idx, e)}
                       autoFocus={idx === 0}
                       className={cn(
-                        "w-9 h-14 md:w-11 md:h-16 text-center text-lg font-black rounded-xl border-2 transition-all outline-none",
-                        digit ? "bg-slate-50 border-slate-200 text-slate-900" : "bg-slate-50/50 border-transparent focus:border-indigo-100 text-slate-900"
+                        "w-full h-14 md:h-16 text-center text-xl font-black rounded-2xl border-2 transition-all outline-none",
+                        digit 
+                          ? "bg-white border-indigo-600 text-indigo-600 shadow-lg shadow-indigo-100" 
+                          : "bg-slate-50 border-transparent focus:border-indigo-200 focus:bg-white text-slate-900"
                       )}
                     />
                   ))}
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-6">
                   <button 
                     onClick={handleVerify} 
                     disabled={loading || token.join('').length < 8}
-                    className="w-full h-14 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-slate-100 hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50"
+                    className="w-full h-16 bg-slate-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.3em] shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 overflow-hidden relative group"
                   >
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin mr-3 inline" /> : null}
-                    {loading ? "Decrypting Access..." : "Verify Identity"}
+                    <span className="relative z-10 flex items-center justify-center gap-3">
+                      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+                      {loading ? "Decrypting Access..." : "Verify Identity"}
+                    </span>
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-blue-600 opacity-0 group-hover:opacity-10 transition-opacity" />
                   </button>
 
                   <button
                     onClick={handleResend}
                     disabled={cooldown > 0 || loading}
-                    className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-300 hover:text-indigo-600 disabled:opacity-30 transition-colors flex items-center justify-center gap-2 mx-auto"
+                    className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 hover:text-indigo-600 disabled:opacity-40 transition-all flex items-center justify-center gap-2 mx-auto py-2"
                   >
-                    <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} />
+                    <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
                     {cooldown > 0 ? `Retry in ${cooldown}s` : "Resend Security Token"}
                   </button>
                 </div>

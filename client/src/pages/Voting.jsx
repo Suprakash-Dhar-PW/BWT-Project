@@ -56,6 +56,20 @@ export default function Voting() {
   }, [voterHash, votes, settings])
 
   useEffect(() => {
+    // FIX 3: REAL-TIME SYNC FOR VOTING HUB
+    const channel = supabase.channel('bwt_realtime_sync')
+      .on('broadcast', { event: 'UPDATED_ELECTION' }, async ({ payload }) => {
+        console.log("[PROTOCOL] Incoming sync notification detected:", payload);
+        await syncSystem(false);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
     if (user && settings?.current_position_id) {
        hashVoter(user.id, settings.current_position_id).then(setVoterHash)
     }

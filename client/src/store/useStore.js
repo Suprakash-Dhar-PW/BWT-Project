@@ -80,13 +80,25 @@ export const useStore = create((set, get) => ({
       const channel = supabase.channel('bwt_realtime_sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
           console.log("Realtime: Settings Revised", payload.new);
-          // Optimistically apply settings if it's an update
           if (payload.new) set({ settings: payload.new });
-          get().syncSystem(true);
         })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, () => get().syncSystem(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, (payload) => {
+          console.log("Realtime: Member Update", payload.eventType);
+          const { members } = get();
+          
+          if (payload.eventType === 'INSERT') {
+            set({ members: [payload.new, ...members] });
+          } else if (payload.eventType === 'UPDATE') {
+            set({ members: members.map(m => m.id === payload.new.id ? payload.new : m) });
+          } else if (payload.eventType === 'DELETE') {
+            set({ members: members.filter(m => m.id === payload.old.id) });
+          }
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => get().syncSystem(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => get().syncSystem(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, (payload) => {
+           // For votes, we might still want a full sync to keep tallies accurate
+           get().syncSystem(true);
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_decisions' }, () => get().syncSystem(true))
         .subscribe((status) => {
           console.log("Realtime Subscription Status:", status);
@@ -95,7 +107,7 @@ export const useStore = create((set, get) => ({
       // 4. Auth State Listener
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
-           set({ user: null, memberData: null, initialized: false });
+           set({ user: null, memberData: null, initialized: false, members: [], positions: [], settings: null, votes: [] });
            isInitializing = false;
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
            if (session?.user) {

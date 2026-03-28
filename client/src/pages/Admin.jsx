@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, memo } from "react";
+import React, { useEffect, useState, useMemo, memo, useCallback, startTransition } from "react";
 import { supabase } from "../lib/supabase";
 import { useStore } from "../store/useStore";
 import { motion, AnimatePresence } from "framer-motion";
@@ -41,17 +41,65 @@ export default function Admin() {
   const [pendingId, setPendingId] = useState(null); // Individual button tracker
   const [errorMsg, setErrorMsg] = useState("");
   const [localLoadingMap, setLocalLoadingMap] = useState({});
+  const [prevNomineeCount, setPrevNomineeCount] = useState(0); // FIX 5: Track nomad count
 
-  // 1. Double check session integrity on mount
-  useEffect(() => {
-    if (!initialized) {
-      syncSystem(false);
-      console.log("Admin Panel Boot initiated.");
+
+  // 2. Data Persistence Layer
+  const refetchData = useCallback(async () => {
+    try {
+       await syncSystem(true);
+       console.log("Registry state refreshed.");
+    } catch(err) {
+       console.error("Transmission Error:", err);
+       setErrorMsg("Network latency detected. Identity data might be stale.");
     }
-  }, [initialized]);
+  }, [syncSystem]);
+
+  // Dynamic Derivations
+  const getWinnerRole = (memberId) => {
+    const pos = positions.find((p) => p.winner_id === memberId);
+    return pos ? pos.name : null;
+  };
+
+  const wonIds = useMemo(() => {
+    return positions.map((p) => p.winner_id).filter(Boolean);
+  }, [positions]);
+
+  const currentPos = positions.find((p) => p.id === settings?.current_position_id) || positions[0];
+
+  const eligibleVoters = useMemo(() => {
+    return members.filter(
+      (m) =>
+        m.is_eligible &&
+        !m.is_admin &&
+        m.email !== "system-state@bwt.internal",
+    ).length;
+  }, [members]);
+
+  const nomineesCount = useMemo(() => {
+    return members.filter(
+      (m) =>
+        m.is_nominee &&
+        !m.is_admin &&
+        !wonIds.includes(m.id) &&
+        m.email !== "system-state@bwt.internal",
+    ).length;
+  }, [members, wonIds]);
+
+  // Cleanup: Any members that match the corrupted pattern are filtered out of the operational view
+  const validMembers = useMemo(() => {
+    return members.filter(
+      (m) =>
+        m.email !== "system-state@bwt.internal" && 
+        !m.name.startsWith("{") && // Corrupted JSON strings
+        !m.name.includes('"round":') // More specific pattern match
+    );
+  }, [members]);
+
+  const isVotingActive = settings?.status === "VOTING";
 
   // Fetch fresh votes for modal
-  const fetchModalData = async () => {
+  const fetchModalData = useCallback(async () => {
     if (!settings?.current_position_id) return;
     try {
       const { data, error } = await supabase
@@ -68,71 +116,40 @@ export default function Admin() {
       }, {});
 
       console.log(`[GOVERNANCE] Fetching Round ${settings.round_number} Tally (Direct DB Query)`);
-      console.log(`[GOVERNANCE] Total Votes Stored: ${data.length}`);
-      console.log(`[GOVERNANCE] Tally Distribution:`, newTally);
       
       setModalTally(newTally);
     } catch (err) {
       console.error("Modal Data Fault:", err);
     }
-  };
+  }, [settings?.current_position_id, settings?.round_number]);
 
+  // 1. Double check session integrity on mount
+  useEffect(() => {
+    if (!initialized) {
+      syncSystem(false);
+      console.log("Admin Panel Boot initiated.");
+    }
+  }, [initialized]);
+
+  // Effects using derivations
   useEffect(() => {
     if (showManualReview) {
+      // FIX 2 & 5: Capture current count BEFORE refetching to check for invalidation
+      setPrevNomineeCount(nomineesCount);
       setModalTally({});
       setManualSelection(null);
       fetchModalData();
     }
-  }, [showManualReview]);
+  }, [showManualReview, nomineesCount]);
 
-  // 2. Data Persistence Layer
-  const refetchData = async () => {
-    try {
-       await syncSystem(true);
-       console.log("Registry state refreshed.");
-    } catch(err) {
-       console.error("Transmission Error:", err);
-       setErrorMsg("Network latency detected. Identity data might be stale.");
+  // FIX 4: Clear old tie state when nominees change
+  useEffect(() => {
+    if (settings?.status === "MANUAL_REVIEW") {
+       setModalTally({});
+       setManualSelection(null);
     }
-  };
+  }, [nomineesCount, settings?.status]);
 
-  // Dynamic Derivations
-  const getWinnerRole = (memberId) => {
-    const pos = positions.find((p) => p.winner_id === memberId);
-    return pos ? pos.name : null;
-  };
-
-  const wonIds = useMemo(() => {
-    return positions.map((p) => p.winner_id).filter(Boolean);
-  }, [positions]);
-
-  const currentPos = positions.find((p) => p.id === settings?.current_position_id) || positions[0];
-
-  const eligibleVoters = members.filter(
-    (m) =>
-      m.is_eligible &&
-      !m.is_admin &&
-      m.email !== "system-state@bwt.internal",
-  ).length;
-  const nomineesCount = members.filter(
-    (m) =>
-      m.is_nominee &&
-      !m.is_admin &&
-      !wonIds.includes(m.id) &&
-      m.email !== "system-state@bwt.internal",
-  ).length;
-
-  // Cleanup: Any members that match the corrupted pattern are filtered out of the operational view
-  const validMembers = useMemo(() => {
-    return members.filter(
-      (m) =>
-        m.email !== "system-state@bwt.internal" && 
-        !m.name.startsWith("{") && // Corrupted JSON strings
-        !m.name.includes('"round":') // More specific pattern match
-    );
-  }, [members]);
-
-  const isVotingActive = settings?.status === "VOTING";
 
   const filteredMembers = useMemo(() => {
     return validMembers.filter(
@@ -199,7 +216,7 @@ export default function Admin() {
     }
   };
 
-  const bulkToggle = async (column, value) => {
+  const bulkToggle = useCallback(async (column, value) => {
     // OPTIMISTIC UPDATE
     const originalMembers = [...members];
     const newMembers = members.map(m => 
@@ -207,11 +224,22 @@ export default function Admin() {
         ? { ...m, [column]: value, ...(column === 'is_eligible' && value === false ? { is_nominee: false } : {}) }
         : m
     );
-    useStore.setState({ members: newMembers });
+    
+    startTransition(() => {
+        useStore.setState({ members: newMembers });
+    });
 
     setActionLoading(true);
     setErrorMsg("");
     try {
+      if (settings?.status === "REVEALED" || settings?.status === "MANUAL_REVIEW") {
+        await Promise.all([
+            supabase.from("votes").delete().eq("position_id", settings.current_position_id),
+            supabase.from("positions").update({ winner_id: null }).eq("id", settings.current_position_id),
+            supabase.from("settings").update({ status: "SETUP", round_number: 1, winner_locked: false }).eq("id", settings.id)
+        ]);
+      }
+
       const updates = { [column]: value };
       if (column === "is_eligible" && value === false) {
         updates.is_nominee = false;
@@ -224,27 +252,47 @@ export default function Admin() {
         .neq("email", "system-state@bwt.internal");
       if (error) throw error;
       
+      const channel = supabase.channel('bwt_realtime_sync');
+      await channel.send({
+        type: 'broadcast',
+        event: 'UPDATED_ELECTION',
+        payload: { role: settings.current_position_id }
+      });
+
     } catch (error) {
-      // ROLLBACK
-      useStore.setState({ members: originalMembers });
+      startTransition(() => {
+          useStore.setState({ members: originalMembers });
+      });
       console.error("Bulk Protocol Failure:", error);
       setErrorMsg(`Bulk update failure: ${error.message}`);
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [members, settings, refetchData]);
 
-  const selectAllNominees = async () => {
+
+  const selectAllNominees = useCallback(async () => {
     // OPTIMISTIC UPDATE
     const originalMembers = [...members];
     const newMembers = members.map(m => 
       !m.is_admin ? { ...m, is_eligible: true, is_nominee: true } : m
     );
-    useStore.setState({ members: newMembers });
+    
+    startTransition(() => {
+        useStore.setState({ members: newMembers });
+    });
 
     setActionLoading(true);
     setErrorMsg("");
     try {
+      if (settings?.status === "REVEALED" || settings?.status === "MANUAL_REVIEW") {
+        await Promise.all([
+            supabase.from("votes").delete().eq("position_id", settings.current_position_id),
+            supabase.from("positions").update({ winner_id: null }).eq("id", settings.current_position_id),
+            supabase.from("settings").update({ status: "SETUP", round_number: 1, winner_locked: false }).eq("id", settings.id)
+        ]);
+      }
+
       const { error } = await supabase
         .from("members")
         .update({
@@ -254,50 +302,83 @@ export default function Admin() {
         .eq("is_admin", false);
 
       if (error) throw error;
+
+      const channel = supabase.channel('bwt_realtime_sync');
+      await channel.send({
+        type: 'broadcast',
+        event: 'UPDATED_ELECTION',
+        payload: { role: settings.current_position_id }
+      });
+
     } catch (error) {
-      // ROLLBACK
-      useStore.setState({ members: originalMembers });
+      startTransition(() => {
+          useStore.setState({ members: originalMembers });
+      });
       console.error("Nominee Promotion Error:", error);
       setErrorMsg("Nominee promotion failure.");
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [members, settings, refetchData]);
 
-  const updateMember = async (id, updates) => {
-    // 1. SPAM PROTECTION: Block double clicks
+
+
+  const updateMember = useCallback(async (id, updates) => {
     if (localLoadingMap[id]) return;
     setLocalLoadingMap(prev => ({ ...prev, [id]: true }));
 
-    // 2. OPTIMISTIC UI: Instant state push
     const originalMembers = [...members];
     const newMembers = members.map(m => m.id === id ? { ...m, ...updates } : m);
-    useStore.setState({ members: newMembers });
+    
+    startTransition(() => {
+        useStore.setState({ members: newMembers });
+    });
 
     try {
+      const isNomineeChange = updates.hasOwnProperty('is_nominee');
+      const isVoterChange = updates.hasOwnProperty('is_eligible');
+
+      if ((isNomineeChange || isVoterChange) && (settings?.status === "REVEALED" || settings?.status === "MANUAL_REVIEW")) {
+        await Promise.all([
+            supabase.from("votes").delete().eq("position_id", settings.current_position_id),
+            supabase.from("settings").update({ status: "SETUP", round_number: 1, winner_locked: false }).eq("id", settings.id),
+            supabase.from("positions").update({ winner_id: null }).eq("id", settings.current_position_id)
+        ]);
+      }
+
       const { error } = await supabase
         .from("members")
         .update(updates)
         .eq("id", id);
       if (error) throw error;
+
+      if (isNomineeChange || isVoterChange) {
+        const channel = supabase.channel('bwt_realtime_sync');
+        await channel.send({
+          type: 'broadcast',
+          event: 'UPDATED_ELECTION',
+          payload: { role: settings.current_position_id }
+        });
+      }
+
     } catch (e) {
-      // ROLLBACK on failure
-      useStore.setState({ members: originalMembers });
+      startTransition(() => {
+          useStore.setState({ members: originalMembers });
+      });
       console.error("Member Update Error:", e);
       setErrorMsg(`Update Failure: ${e.message}`);
     } finally {
-      // 3. RELEASE LOCK: Protocol complete
       setLocalLoadingMap(prev => ({ ...prev, [id]: false }));
     }
-  };
+  }, [members, settings, localLoadingMap]);
 
-  const toggleEligible = async (m) => {
+  const toggleEligible = useCallback(async (m) => {
     const updates = { is_eligible: !m.is_eligible };
     if (m.is_eligible) updates.is_nominee = false;
     await updateMember(m.id, updates);
-  };
+  }, [updateMember]);
 
-  const transferAdmin = async (newAdmin) => {
+  const transferAdmin = useCallback(async (newAdmin) => {
     if (
       !confirm(
         `ARE YOU SURE? \n\nYou are about to transfer Admin Control to ${newAdmin.name} (${newAdmin.email}). \n\nYOU WILL LOSE ACCESS to this panel immediately.`,
@@ -311,9 +392,6 @@ export default function Admin() {
       const currentAdmin = members.find((m) => m.is_admin);
       if (!currentAdmin) throw new Error("Admin session integrity fault.");
 
-      // Atomic Single-Transaction Protocol (RPC)
-      // This prevents the race condition where the current admin loses permissions 
-      // before they can grant them to the new admin.
       const { error: transferErr } = await supabase.rpc("transfer_admin_role", {
         old_admin_email: currentAdmin.email,
         new_admin_email: newAdmin.email,
@@ -321,7 +399,6 @@ export default function Admin() {
 
       if (transferErr) throw transferErr;
 
-      // Global store sync following the protocol update
       await syncSystem(true);
       
       console.log("Atomic Transfer Complete. New registry state:", useStore.getState().members);
@@ -332,9 +409,9 @@ export default function Admin() {
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [members, syncSystem]);
 
-  const deleteMember = async (id) => {
+  const deleteMember = useCallback(async (id) => {
     setActionLoading(true);
     setErrorMsg("");
     try {
@@ -346,9 +423,9 @@ export default function Admin() {
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [syncSystem]);
 
-  const resetVoting = async () => {
+  const resetVoting = useCallback(async () => {
     if (
       !confirm(
         "Are you sure you want to perform a TOTAL SYSTEM RESET? All votes will be purged and members reset.",
@@ -356,21 +433,21 @@ export default function Admin() {
     )
       return;
 
-    // 1. OPTIMISTIC RESET: Zero Latency UI
     const originalSettings = { ...settings };
     const originalMembers = [...members];
     const originalVotes = [...votes];
 
-    useStore.setState({
-      settings: { ...settings, status: 'SETUP', current_position_id: positions[0]?.id, round_number: 1 },
-      members: members.map(m => !m.is_admin ? { ...m, is_eligible: false, is_nominee: false, eliminated: false } : m),
-      votes: []
+    startTransition(() => {
+        useStore.setState({
+          settings: { ...settings, status: 'SETUP', current_position_id: positions[0]?.id, round_number: 1 },
+          members: members.map(m => !m.is_admin ? { ...m, is_eligible: false, is_nominee: false, eliminated: false } : m),
+          votes: []
+        });
     });
 
     setActionLoading(true);
     setErrorMsg("");
     try {
-      // 2. PARALLEL DB PURGE: High-speed recovery protocol
       await Promise.all([
         supabase.from("votes").delete().not("id", "is", null),
         supabase.from("positions").update({ winner_id: null }).not("id", "is", null),
@@ -386,19 +463,22 @@ export default function Admin() {
       await syncSystem(false);
       alert("System Reset Complete: Registry synchronized and ballot boxes purged.");
     } catch (e) {
-      // ROLLBACK on critical failure
-      useStore.setState({ settings: originalSettings, members: originalMembers, votes: originalVotes });
+      startTransition(() => {
+          useStore.setState({ settings: originalSettings, members: originalMembers, votes: originalVotes });
+      });
       console.error("Critical System reset failure:", e);
       setErrorMsg(`Major protocol error during reset: ${e.message}`);
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [settings, members, votes, positions, syncSystem]);
 
-  const updateSettings = async (updates) => {
-    // 1. OPTIMISTIC UPDATE: Instant UI response
+  const updateSettings = useCallback(async (updates) => {
     const originalSettings = { ...settings };
-    useStore.setState({ settings: { ...settings, ...updates } });
+    
+    startTransition(() => {
+        useStore.setState({ settings: { ...settings, ...updates } });
+    });
 
     try {
       const { error: updateErr } = await supabase
@@ -408,17 +488,17 @@ export default function Admin() {
       
       if (updateErr) throw updateErr;
 
-      // Ensure local store is perfect
       await syncSystem(false);
     } catch (e) {
-      // ROLLBACK on failure
-      useStore.setState({ settings: originalSettings });
+      startTransition(() => {
+          useStore.setState({ settings: originalSettings });
+      });
       console.error("Control Fault:", e);
       setErrorMsg(`Control Fault: ${e.message}`);
     }
-  };
+  }, [settings, syncSystem]);
 
-  const startElection = async () => {
+  const startElection = useCallback(async () => {
     if (nomineesCount === 0) {
       return setErrorMsg("Forbidden: You must select at least 1 nominee before starting.");
     }
@@ -428,7 +508,6 @@ export default function Admin() {
         const activePosId = settings?.current_position_id || (positions.length > 0 ? positions[0].id : null);
         if (!activePosId) throw new Error("No operational roles detected.");
 
-        // Clear previous session votes for THIS position to start fresh
         await supabase.from("votes").delete().eq("position_id", activePosId);
         
         await updateSettings({ 
@@ -443,57 +522,9 @@ export default function Admin() {
     } finally {
         setActionLoading(false);
     }
-  };
+  }, [nomineesCount, settings, positions, updateSettings]);
 
-  const stopVoting = async () => {
-    setActionLoading(true);
-    setErrorMsg("");
-    try {
-      if (!settings?.current_position_id)
-        throw new Error("Null pointer: No active position identified.");
-
-      // 1. Tally votes for this position and CURRENT ROUND (Directly from DB)
-      const { data: voteData, error: voteErr } = await supabase
-        .from("votes")
-        .select("nominee_id")
-        .eq("position_id", settings.current_position_id)
-        .eq("round_number", settings.round_number || 1);
-
-      if (voteErr) throw voteErr;
-
-      // 2. Compute Tally logic
-      const tally = voteData.reduce((acc, v) => {
-        acc[v.nominee_id] = (acc[v.nominee_id] || 0) + 1;
-        return acc;
-      }, {});
-      
-      const counts = Object.values(tally);
-      const maxVotes = counts.length > 0 ? Math.max(...counts) : 0;
-      const winners = Object.entries(tally).filter(([id, count]) => count === maxVotes);
-      
-      const isTie = winners.length > 1;
-
-      if (!isTie && winners.length === 1 && maxVotes > 0) {
-          // MAJORITY DETECTED: AUTO-FINALIZE
-          console.log("[PROTOCOL] Majority detected. Bypassing Governance Phase.");
-          const winnerId = winners[0][0];
-          await finalizeWinner(winnerId, false);
-      } else {
-          // TIE OR NO VOTES: GOVERNANCE PHASE
-          console.log("[PROTOCOL] Tie detected or no votes cast. Entering Governance Phase.");
-          await updateSettings({ status: "MANUAL_REVIEW" });
-          await refetchData();
-      }
-      
-    } catch (e) {
-      console.error("Transmission Halt:", e.message);
-      setErrorMsg(`Workflow Error: ${e.message}`);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const finalizeWinner = async (winnerId, isManual = false) => {
+  const finalizeWinner = useCallback(async (winnerId, isManual = false) => {
     setActionLoading(true);
     setErrorMsg("");
     try {
@@ -502,7 +533,6 @@ export default function Admin() {
       const winner = members.find(m => m.id === winnerId);
       if (!winner) throw new Error("Candidate identification failure");
 
-      // 1. If manual override, record the decision
       if (isManual) {
         await supabase.from('manual_decisions').insert({
           role: currentPos?.name,
@@ -512,22 +542,17 @@ export default function Admin() {
         });
       }
 
-      // 2. Update Position table
       const { error: winErr } = await supabase
         .from("positions")
         .update({ winner_id: winnerId })
         .eq("id", settings.current_position_id);
       if (winErr) throw winErr;
 
-      // 3. Eliminate winner from registry
       await supabase
         .from("members")
         .update({ is_nominee: false, eliminated: true })
         .eq("id", winnerId);
 
-
-      // 4. Update election results summary
-      // We need to fetch current round votes to store in results
       const { data: finalVotes } = await supabase
         .from("votes")
         .select("id")
@@ -541,7 +566,6 @@ export default function Admin() {
         votes: finalVotes?.length || 0
       });
 
-      // 5. Finalize state
       await updateSettings({ 
         status: "REVEALED",
         winner_locked: true
@@ -555,12 +579,55 @@ export default function Admin() {
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [settings, members, currentPos, updateSettings, refetchData]);
 
-  const nextRole = async () => {
+  const stopVoting = useCallback(async () => {
+    setActionLoading(true);
+    setErrorMsg("");
+    try {
+      if (!settings?.current_position_id)
+        throw new Error("Null pointer: No active position identified.");
+
+      const { data: voteData, error: voteErr } = await supabase
+        .from("votes")
+        .select("nominee_id")
+        .eq("position_id", settings.current_position_id)
+        .eq("round_number", settings.round_number || 1);
+
+      if (voteErr) throw voteErr;
+
+      const tally = voteData.reduce((acc, v) => {
+        acc[v.nominee_id] = (acc[v.nominee_id] || 0) + 1;
+        return acc;
+      }, {});
+      
+      const counts = Object.values(tally);
+      const maxVotes = counts.length > 0 ? Math.max(...counts) : 0;
+      const winners = Object.entries(tally).filter(([id, count]) => count === maxVotes);
+      
+      const isTie = winners.length > 1;
+
+      if (!isTie && winners.length === 1 && maxVotes > 0) {
+          console.log("[PROTOCOL] Majority detected. Bypassing Governance Phase.");
+          const winnerId = winners[0][0];
+          await finalizeWinner(winnerId, false);
+      } else {
+          console.log("[PROTOCOL] Tie detected or no votes cast. Entering Governance Phase.");
+          await updateSettings({ status: "MANUAL_REVIEW" });
+          await refetchData();
+      }
+      
+    } catch (e) {
+      console.error("Transmission Halt:", e.message);
+      setErrorMsg(`Workflow Error: ${e.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [settings, finalizeWinner, updateSettings, refetchData]);
+
+  const nextRole = useCallback(async () => {
     setActionLoading(true);
     try {
-      // Find following position without a winner
       const nextOne = positions.find(p => !p.winner_id);
       
       if (nextOne) {
@@ -579,30 +646,27 @@ export default function Admin() {
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [positions, updateSettings, syncSystem]);
 
-  const startAnotherRound = async () => {
+  const startAnotherRound = useCallback(async () => {
     if (actionLoading) return;
     setActionLoading(true);
     setErrorMsg("");
     try {
       const nextRound = (settings?.round_number || 1) + 1;
       
-      // 1. CLEAR previous votes for this position as per protocol
       console.log(`[PROTOCOL] Clearing position-specific votes for Round ${nextRound} reset.`);
       await supabase
         .from("votes")
         .delete()
         .eq("position_id", settings.current_position_id);
 
-      // 2. Update settings to new round
       await updateSettings({
         round_number: nextRound,
         status: "VOTING",
         winner_locked: false
       });
 
-      // 3. BROADCAST a signal to all clients to force-sync
       const channel = supabase.channel('bwt_realtime_sync');
       await channel.send({
         type: 'broadcast',
@@ -610,7 +674,6 @@ export default function Admin() {
         payload: { round: nextRound }
       });
 
-      // 4. Force Global Sync
       await syncSystem(false);
       
     } catch (e) {
@@ -619,7 +682,7 @@ export default function Admin() {
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [settings, updateSettings, syncSystem, actionLoading]);
 
 
   return (
@@ -709,16 +772,18 @@ export default function Admin() {
                   onClick={startElection}
                   className="w-full h-10 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
                 >
-                  <Play className="w-4 h-4 fill-current" /> Start Voting
+                  <Play className={cn("w-4 h-4", actionLoading && "animate-spin")} />
+                  {actionLoading ? "Initializing..." : "Start Voting Session"}
                 </button>
               )}
               {settings?.status === "VOTING" && (
                 <button
                   disabled={actionLoading}
                   onClick={stopVoting}
-                  className="w-full h-9 bg-slate-900 text-white rounded text-xs font-bold hover:bg-slate-800 transition disabled:opacity-50 shadow-lg shadow-slate-100 flex items-center justify-center gap-1.5 mt-2"
+                  className="w-full h-10 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition disabled:opacity-50 shadow-lg shadow-slate-100 flex items-center justify-center gap-2"
                 >
-                  <X className="w-4 h-4" /> Stop Voting Session
+                  {actionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+                  {actionLoading ? "Processing Tally..." : "Stop Voting Session"}
                 </button>
               )}
               {settings?.status === "MANUAL_REVIEW" && (
@@ -739,7 +804,8 @@ export default function Admin() {
                     onClick={startAnotherRound}
                     className="w-full h-10 border-2 border-slate-100 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition flex items-center justify-center gap-2"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" /> Start New Round
+                    <RefreshCw className={cn("w-3.5 h-3.5", actionLoading && "animate-spin")} />
+                    {actionLoading ? "Resetting Round..." : "Start New Round"}
                   </button>
                 </div>
               )}
@@ -747,13 +813,14 @@ export default function Admin() {
                 <button
                   disabled={actionLoading}
                   onClick={nextRole}
-                  className="w-full h-8 bg-slate-900 text-white rounded text-xs font-medium hover:bg-slate-800 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  className="w-full h-10 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-slate-100"
                 >
-                  Next Round <ChevronRight className="w-3 h-3" />
+                  {actionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
+                  {actionLoading ? "Switching..." : "Next Role"}
                 </button>
               )}
               {settings?.status === "FINISHED" && (
-                <div className="h-8 bg-slate-50 border border-slate-200 text-slate-500 rounded text-xs font-medium flex items-center justify-center">
+                <div className="h-10 bg-slate-50 border border-slate-100 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">
                   Cycle Completed
                 </div>
               )}
@@ -891,7 +958,19 @@ export default function Admin() {
                 </div>
 
                 <div className="space-y-6 mb-10">
+                  {/* FIX 5: UI SAFETY CHECK */}
+                  {nomineesCount !== prevNomineeCount && prevNomineeCount > 0 && (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 mb-6">
+                      <AlertTriangle className="w-5 h-5 text-amber-600" />
+                      <div>
+                        <p className="text-xs font-black text-amber-800 uppercase tracking-tight">Nominees Updated</p>
+                        <p className="text-[10px] text-amber-700 font-medium">Previous results invalidated. Please conduct voting again.</p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50 pb-4">
+
                     <span>Candidates (Round {settings.round_number})</span>
                     <span>Tally Summary</span>
                   </div>
@@ -1008,7 +1087,7 @@ export default function Admin() {
 
                     return (
                       <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
-                         <p className="text-xs font-bold text-slate-400">Waiting for ballots to be audited...</p>
+                         <p className="text-xs font-bold text-slate-400">No valid votes recorded for this round.</p>
                       </div>
                     );
                   })()}
