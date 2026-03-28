@@ -21,6 +21,10 @@ export default function Results() {
   const syncSystem = useStore(state => state.syncSystem)
   const loading = useStore(state => state.loading)
   
+  useEffect(() => {
+    syncSystem(true)
+  }, [syncSystem])
+
   const [errorMsg, setErrorMsg] = useState("")
 
   const results = useMemo(() => {

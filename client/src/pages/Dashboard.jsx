@@ -32,6 +32,10 @@ export default function Dashboard() {
   const votes = useStore(state => state.votes)
   const loading = useStore(state => state.loading)
   const syncSystem = useStore(state => state.syncSystem)
+
+  useEffect(() => {
+    syncSystem(true)
+  }, [syncSystem])
   
   const currentPos = useMemo(() => {
     return positions.find(p => p.id === settings?.current_position_id) || positions[0]

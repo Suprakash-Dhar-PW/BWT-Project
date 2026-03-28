@@ -125,11 +125,9 @@ export default function Admin() {
 
   // 1. Double check session integrity on mount
   useEffect(() => {
-    if (!initialized) {
-      syncSystem(false);
-      console.log("Admin Panel Boot initiated.");
-    }
-  }, [initialized]);
+    syncSystem(true);
+    console.log("[ADMIN] Forced Protocol Sync Initiated.");
+  }, [syncSystem]);
 
   // Effects using derivations
   useEffect(() => {
