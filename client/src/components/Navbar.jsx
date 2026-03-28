@@ -33,11 +33,14 @@ export default function Navbar() {
       <div className="container mx-auto px-4 md:px-8">
         <div className="flex justify-between items-center h-20">
           
-          <Link to="/dashboard" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-110">
-               <Shield className="w-6 h-6" />
+           <Link to="/dashboard" className="flex items-center gap-4 group">
+            <div className="w-14 h-14 bg-white/50 backdrop-blur-sm rounded-2xl flex items-center justify-center p-2 shadow-sm border border-slate-50 transition-all group-hover:shadow-md group-hover:scale-105">
+               <img src="/bwt.png" alt="BWT Logo" className="w-full h-full object-contain" />
             </div>
-            <span className="text-xl font-black text-slate-900 tracking-tighter uppercase hidden sm:inline">BWT <span className="text-blue-600">Protocol</span></span>
+            <div className="flex flex-col">
+              <span className="text-xl font-black text-slate-900 tracking-tighter uppercase leading-none">BWT</span>
+              <span className="text-[8px] font-black text-blue-600 uppercase tracking-[0.3em] leading-none mt-1">Protocol</span>
+            </div>
           </Link>
 
           <div className="hidden md:flex items-center gap-2">

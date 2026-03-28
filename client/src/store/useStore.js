@@ -61,49 +61,56 @@ export const useStore = create((set, get) => ({
   },
 
   init: async () => {
-    if (get().initialized) return
-    if (isInitializing) return
-    isInitializing = true
+    if (get().initialized && !isInitializing) return;
+    if (isInitializing) return;
+    isInitializing = true;
     
     try {
-      // 1. Core Auth State Validation
-      const { data: { user }, error: authErr } = await supabase.auth.getUser()
-      if (authErr && (authErr.message.includes('Refresh Token Not Found') || authErr.status === 401)) {
-          await supabase.auth.signOut()
-          set({ user: null, memberData: null })
-      } else {
-        set({ user: user || null })
-        if (user) await get().fetchUserData(user.email)
-      }
+      // 1. Initial State Fetch
+      const { data: { user } } = await supabase.auth.getUser();
+      set({ user: user || null });
+      if (user) await get().fetchUserData(user.email);
 
-      // 2. Initial Full System Sync 
-      await get().syncSystem(true)
+      await get().syncSystem(true);
 
-      // 3. Real-time Subscriptions
+      // 2. Clear previous subscriptions if any
+      supabase.removeAllChannels();
+
+      // 3. Robust Real-time Subscription Channel
+      const channel = supabase.channel('bwt_realtime_sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
+          console.log("Realtime: Settings Revised", payload.new);
+          // Optimistically apply settings if it's an update
+          if (payload.new) set({ settings: payload.new });
+          get().syncSystem(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, () => get().syncSystem(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => get().syncSystem(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => get().syncSystem(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_decisions' }, () => get().syncSystem(true))
+        .subscribe((status) => {
+          console.log("Realtime Subscription Status:", status);
+        });
+
+      // 4. Auth State Listener
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
-           set({ user: null, memberData: null, initialized: false })
-           isInitializing = false
+           set({ user: null, memberData: null, initialized: false });
+           isInitializing = false;
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
            if (session?.user) {
-              set({ user: session.user })
-              await get().fetchUserData(session.user.email)
+              set({ user: session.user });
+              await get().fetchUserData(session.user.email);
+              await get().syncSystem(true);
            }
         }
-      })
-
-      supabase.channel('global_revisions')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => get().syncSystem(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, () => get().syncSystem(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, () => get().syncSystem(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => get().syncSystem(true))
-        .subscribe()
+      });
 
     } catch (e) {
-      console.error("Critical Vault Error:", e)
+      console.error("Critical Vault Error:", e);
     } finally {
-      isInitializing = false
-      set({ loading: false, initialized: true })
+      isInitializing = false;
+      set({ loading: false, initialized: true });
     }
   },
 
@@ -186,17 +193,28 @@ export const useStore = create((set, get) => ({
   },
 
   updateSettings: async (updates) => {
-    const { settings } = get()
-    if (!settings?.id) return { error: new Error("Settings not loaded") }
+    const { settings } = get();
+    if (!settings?.id) return { error: new Error("Settings not loaded") };
 
-    const { error } = await supabase
-      .from('settings')
-      .update(updates)
-      .eq('id', settings.id)
-    
-    if (!error) {
-      await get().syncSystem(true)
+    // OPTIMISTIC UPDATE: Instant global sync
+    const originalSettings = { ...settings };
+    set({ settings: { ...settings, ...updates } });
+
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .update(updates)
+        .eq('id', settings.id);
+      
+      if (error) throw error;
+      
+      await get().syncSystem(true);
+      return { error: null };
+    } catch (e) {
+      // ROLLBACK on error
+      set({ settings: originalSettings });
+      console.error("Settings Update Fault:", e);
+      return { error: e };
     }
-    return { error }
   }
 }))

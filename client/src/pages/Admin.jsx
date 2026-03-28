@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, memo } from "react";
 import { supabase } from "../lib/supabase";
 import { useStore } from "../store/useStore";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
   Trash2,
@@ -11,10 +12,12 @@ import {
   Check,
   X,
   AlertTriangle,
+  RefreshCw,
+  Hash,
+  CheckCircle2,
 } from "lucide-react";
 import Badge from "../components/Badge";
 import AlertModal from "../components/AlertModal";
-import TieBreakModal from "../components/TieBreakModal";
 import { cn } from "../lib/utils";
 import PageLoader from "../components/PageLoader";
 
@@ -23,17 +26,21 @@ export default function Admin() {
   const positions = useStore((state) => state.positions);
   const settings = useStore((state) => state.settings);
   const syncSystem = useStore((state) => state.syncSystem);
+  const votes = useStore((state) => state.votes);
   const loading = useStore((state) => state.loading);
   const initialized = useStore((state) => state.initialized);
 
   if (loading || !initialized) return <PageLoader />;
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [showManualReview, setShowManualReview] = useState(false);
+  const [modalTally, setModalTally] = useState({});
+  const [manualSelection, setManualSelection] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(null);
   const [actionLoading, setActionLoading] = useState(false); // Global panel state
   const [pendingId, setPendingId] = useState(null); // Individual button tracker
   const [errorMsg, setErrorMsg] = useState("");
-  const [tieData, setTieData] = useState({ isTie: false, candidates: [] });
+  const [localLoadingMap, setLocalLoadingMap] = useState({});
 
   // 1. Double check session integrity on mount
   useEffect(() => {
@@ -42,6 +49,41 @@ export default function Admin() {
       console.log("Admin Panel Boot initiated.");
     }
   }, [initialized]);
+
+  // Fetch fresh votes for modal
+  const fetchModalData = async () => {
+    if (!settings?.current_position_id) return;
+    try {
+      const { data, error } = await supabase
+        .from("votes")
+        .select("nominee_id")
+        .eq("position_id", settings.current_position_id)
+        .eq("round_number", settings.round_number);
+      
+      if (error) throw error;
+      
+      const newTally = data.reduce((acc, v) => {
+        acc[v.nominee_id] = (acc[v.nominee_id] || 0) + 1;
+        return acc;
+      }, {});
+
+      console.log(`[GOVERNANCE] Fetching Round ${settings.round_number} Tally (Direct DB Query)`);
+      console.log(`[GOVERNANCE] Total Votes Stored: ${data.length}`);
+      console.log(`[GOVERNANCE] Tally Distribution:`, newTally);
+      
+      setModalTally(newTally);
+    } catch (err) {
+      console.error("Modal Data Fault:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (showManualReview) {
+      setModalTally({});
+      setManualSelection(null);
+      fetchModalData();
+    }
+  }, [showManualReview]);
 
   // 2. Data Persistence Layer
   const refetchData = async () => {
@@ -64,9 +106,7 @@ export default function Admin() {
     return positions.map((p) => p.winner_id).filter(Boolean);
   }, [positions]);
 
-  const currentPos =
-    positions.find((p) => p.id === settings?.current_position_id) ||
-    positions[0];
+  const currentPos = positions.find((p) => p.id === settings?.current_position_id) || positions[0];
 
   const eligibleVoters = members.filter(
     (m) =>
@@ -119,13 +159,26 @@ export default function Admin() {
       return setErrorMsg("Registry Identity Error: User already exists.");
     }
 
+    const newMemberPlaceholder = {
+      id: "placeholder-" + Date.now(),
+      name: name.value.trim(),
+      email: trimmedEmail,
+      is_admin: false,
+      is_eligible: true,
+      is_nominee: false,
+    };
+
+    // Optimistic Update
+    const originalMembers = [...members];
+    useStore.setState({ members: [newMemberPlaceholder, ...members] });
+
     setActionLoading(true);
     setErrorMsg("");
     try {
       const { error } = await supabase.from("members").insert([
         {
-          name: name.value.trim(),
-          email: trimmedEmail,
+          name: newMemberPlaceholder.name,
+          email: newMemberPlaceholder.email,
           is_admin: false,
           is_eligible: true,
           is_nominee: false,
@@ -137,6 +190,8 @@ export default function Admin() {
       console.log("New member registered successfully.");
       await refetchData();
     } catch (e) {
+      // Rollback
+      useStore.setState({ members: originalMembers });
       console.error("Member Registration Error:", e);
       setErrorMsg(`Registry Fault: ${e.message}`);
     } finally {
@@ -145,6 +200,15 @@ export default function Admin() {
   };
 
   const bulkToggle = async (column, value) => {
+    // OPTIMISTIC UPDATE
+    const originalMembers = [...members];
+    const newMembers = members.map(m => 
+      !m.is_admin && m.email !== "system-state@bwt.internal"
+        ? { ...m, [column]: value, ...(column === 'is_eligible' && value === false ? { is_nominee: false } : {}) }
+        : m
+    );
+    useStore.setState({ members: newMembers });
+
     setActionLoading(true);
     setErrorMsg("");
     try {
@@ -160,9 +224,9 @@ export default function Admin() {
         .neq("email", "system-state@bwt.internal");
       if (error) throw error;
       
-      console.log(`Bulk update protocol (${column}) executed.`);
-      await refetchData();
     } catch (error) {
+      // ROLLBACK
+      useStore.setState({ members: originalMembers });
       console.error("Bulk Protocol Failure:", error);
       setErrorMsg(`Bulk update failure: ${error.message}`);
     } finally {
@@ -171,6 +235,13 @@ export default function Admin() {
   };
 
   const selectAllNominees = async () => {
+    // OPTIMISTIC UPDATE
+    const originalMembers = [...members];
+    const newMembers = members.map(m => 
+      !m.is_admin ? { ...m, is_eligible: true, is_nominee: true } : m
+    );
+    useStore.setState({ members: newMembers });
+
     setActionLoading(true);
     setErrorMsg("");
     try {
@@ -183,9 +254,9 @@ export default function Admin() {
         .eq("is_admin", false);
 
       if (error) throw error;
-      console.log("Nominee mass promotion protocol complete.");
-      await refetchData();
     } catch (error) {
+      // ROLLBACK
+      useStore.setState({ members: originalMembers });
       console.error("Nominee Promotion Error:", error);
       setErrorMsg("Nominee promotion failure.");
     } finally {
@@ -194,20 +265,29 @@ export default function Admin() {
   };
 
   const updateMember = async (id, updates) => {
-    setPendingId(id);
+    // 1. SPAM PROTECTION: Block double clicks
+    if (localLoadingMap[id]) return;
+    setLocalLoadingMap(prev => ({ ...prev, [id]: true }));
+
+    // 2. OPTIMISTIC UI: Instant state push
+    const originalMembers = [...members];
+    const newMembers = members.map(m => m.id === id ? { ...m, ...updates } : m);
+    useStore.setState({ members: newMembers });
+
     try {
       const { error } = await supabase
         .from("members")
         .update(updates)
         .eq("id", id);
       if (error) throw error;
-      
-      await refetchData();
     } catch (e) {
+      // ROLLBACK on failure
+      useStore.setState({ members: originalMembers });
       console.error("Member Update Error:", e);
-      setErrorMsg(`Member Update Failure: ${e.message}`);
+      setErrorMsg(`Update Failure: ${e.message}`);
     } finally {
-      setPendingId(null);
+      // 3. RELEASE LOCK: Protocol complete
+      setLocalLoadingMap(prev => ({ ...prev, [id]: false }));
     }
   };
 
@@ -271,57 +351,43 @@ export default function Admin() {
   const resetVoting = async () => {
     if (
       !confirm(
-        "Are you sure you want to perform a TOTAL SYSTEM RESET? All votes will be purged.",
+        "Are you sure you want to perform a TOTAL SYSTEM RESET? All votes will be purged and members reset.",
       )
     )
       return;
 
+    // 1. OPTIMISTIC RESET: Zero Latency UI
+    const originalSettings = { ...settings };
+    const originalMembers = [...members];
+    const originalVotes = [...votes];
+
+    useStore.setState({
+      settings: { ...settings, status: 'SETUP', current_position_id: positions[0]?.id, round_number: 1 },
+      members: members.map(m => !m.is_admin ? { ...m, is_eligible: false, is_nominee: false, eliminated: false } : m),
+      votes: []
+    });
+
     setActionLoading(true);
     setErrorMsg("");
     try {
-      // 1. Purge all ballot records
-      const { error: purgeErr } = await supabase
-        .from("votes")
-        .delete()
-        .not("id", "is", null);
-      if (purgeErr) throw purgeErr;
+      // 2. PARALLEL DB PURGE: High-speed recovery protocol
+      await Promise.all([
+        supabase.from("votes").delete().not("id", "is", null),
+        supabase.from("positions").update({ winner_id: null }).not("id", "is", null),
+        supabase.from("members").update({ is_eligible: false, is_nominee: false, eliminated: false }).eq("is_admin", false),
+        supabase.from("settings").update({ 
+           status: "SETUP", 
+           current_position_id: positions[0]?.id || null, 
+           round_number: 1,
+           winner_locked: false
+        }).eq("id", settings?.id)
+      ]);
 
-      // 2. Wipe position winners
-      const { error: clearWinnersErr } = await supabase
-        .from("positions")
-        .update({ winner_id: null })
-        .not("id", "is", null);
-      if (clearWinnersErr) throw clearWinnersErr;
-
-      // 3. Reset all member flags
-      const { error: resetRegistryErr } = await supabase
-        .from("members")
-        .update({
-          is_eligible: false,
-          is_nominee: false,
-          eliminated: false, // NEW: Full erasure of elimination state
-        })
-        .eq("is_admin", false);
-      if (resetRegistryErr) throw resetRegistryErr;
-
-      // 4. Force reset system settings to 'SETUP'
-      const { error: settingsErr } = await supabase
-        .from("settings")
-        .update({
-          status: "SETUP",
-          current_position_id: positions[0]?.id || 1,
-          round_number: 1
-        })
-        .eq("id", settings?.id || 1);
-      if (settingsErr) throw settingsErr;
-
-      // 5. Global Store Hard Sync
-      await syncSystem(true); // Using silent sync to avoid full-page flicker during reset
-      setErrorMsg("");
-      alert(
-        "System Reset Complete: Registry synchronized and ballot boxes purged.",
-      );
+      await syncSystem(false);
+      alert("System Reset Complete: Registry synchronized and ballot boxes purged.");
     } catch (e) {
+      // ROLLBACK on critical failure
+      useStore.setState({ settings: originalSettings, members: originalMembers, votes: originalVotes });
       console.error("Critical System reset failure:", e);
       setErrorMsg(`Major protocol error during reset: ${e.message}`);
     } finally {
@@ -330,53 +396,53 @@ export default function Admin() {
   };
 
   const updateSettings = async (updates) => {
-    setActionLoading(true);
-    setErrorMsg("");
+    // 1. OPTIMISTIC UPDATE: Instant UI response
+    const originalSettings = { ...settings };
+    useStore.setState({ settings: { ...settings, ...updates } });
+
     try {
-      const { data: sData, error: fetchErr } = await supabase
+      const { error: updateErr } = await supabase
         .from("settings")
-        .select("id")
-        .limit(1)
-        .maybeSingle();
-      if (fetchErr) throw fetchErr;
+        .update(updates)
+        .eq("id", settings?.id || 1);
+      
+      if (updateErr) throw updateErr;
 
-      if (sData) {
-        const { error: updateErr } = await supabase
-          .from("settings")
-          .update(updates)
-          .eq("id", sData.id);
-        if (updateErr) throw updateErr;
-
-        // Force store refresh for immediate UI response
-        const { data: newSettings, error: refreshErr } = await supabase
-          .from("settings")
-          .select("*")
-          .eq("id", sData.id)
-          .single();
-        if (refreshErr) throw refreshErr;
-
-        if (newSettings) {
-          useStore.setState({ settings: newSettings });
-          await syncSystem(true);
-        }
-      } else {
-        throw new Error("System settings record hidden or missing.");
-      }
+      // Ensure local store is perfect
+      await syncSystem(false);
     } catch (e) {
+      // ROLLBACK on failure
+      useStore.setState({ settings: originalSettings });
       console.error("Control Fault:", e);
       setErrorMsg(`Control Fault: ${e.message}`);
-    } finally {
-      setActionLoading(false);
     }
   };
 
-  const startElection = () => {
+  const startElection = async () => {
     if (nomineesCount === 0) {
-      return setErrorMsg(
-        "Forbidden: You must select at least 1 nominee before starting.",
-      );
+      return setErrorMsg("Forbidden: You must select at least 1 nominee before starting.");
     }
-    updateSettings({ status: "VOTING", current_position_id: positions[0]?.id });
+    
+    setActionLoading(true);
+    try {
+        const activePosId = settings?.current_position_id || (positions.length > 0 ? positions[0].id : null);
+        if (!activePosId) throw new Error("No operational roles detected.");
+
+        // Clear previous session votes for THIS position to start fresh
+        await supabase.from("votes").delete().eq("position_id", activePosId);
+        
+        await updateSettings({ 
+            status: "VOTING", 
+            current_position_id: activePosId,
+            round_number: 1,
+            winner_locked: false
+        });
+    } catch(err) {
+        console.error("Start Election Fault:", err);
+        setErrorMsg("Failed to initialize election protocol.");
+    } finally {
+        setActionLoading(false);
+    }
   };
 
   const stopVoting = async () => {
@@ -386,80 +452,39 @@ export default function Admin() {
       if (!settings?.current_position_id)
         throw new Error("Null pointer: No active position identified.");
 
-      // 1. Tally votes for this position
-      const { data: votes, error: voteErr } = await supabase
+      // 1. Tally votes for this position and CURRENT ROUND (Directly from DB)
+      const { data: voteData, error: voteErr } = await supabase
         .from("votes")
         .select("nominee_id")
-        .eq("position_id", settings.current_position_id);
+        .eq("position_id", settings.current_position_id)
+        .eq("round_number", settings.round_number || 1);
 
       if (voteErr) throw voteErr;
 
-      if (!votes || votes.length === 0) {
-        // No votes cast - just halt
-        await updateSettings({ status: "REVEALED" });
-        return;
+      // 2. Compute Tally logic
+      const tally = voteData.reduce((acc, v) => {
+        acc[v.nominee_id] = (acc[v.nominee_id] || 0) + 1;
+        return acc;
+      }, {});
+      
+      const counts = Object.values(tally);
+      const maxVotes = counts.length > 0 ? Math.max(...counts) : 0;
+      const winners = Object.entries(tally).filter(([id, count]) => count === maxVotes);
+      
+      const isTie = winners.length > 1;
+
+      if (!isTie && winners.length === 1 && maxVotes > 0) {
+          // MAJORITY DETECTED: AUTO-FINALIZE
+          console.log("[PROTOCOL] Majority detected. Bypassing Governance Phase.");
+          const winnerId = winners[0][0];
+          await finalizeWinner(winnerId, false);
+      } else {
+          // TIE OR NO VOTES: GOVERNANCE PHASE
+          console.log("[PROTOCOL] Tie detected or no votes cast. Entering Governance Phase.");
+          await updateSettings({ status: "MANUAL_REVIEW" });
+          await refetchData();
       }
-
-      const tally = {};
-      votes.forEach((v) => {
-        tally[v.nominee_id] = (tally[v.nominee_id] || 0) + 1;
-      });
-
-      // 2. Find plurality winner
-      let maxVotes = 0;
-      Object.entries(tally).forEach(([id, count]) => {
-        if (count > maxVotes) {
-          maxVotes = count;
-        }
-      });
-
-      // 3. Detect Ties
-      const topCandidates = Object.entries(tally)
-        .filter(([id, count]) => count === maxVotes)
-        .map(([id, count]) => ({
-          id,
-          votes: count,
-          name: members.find((m) => m.id === id)?.name || "Unknown Identity",
-        }));
-
-      if (topCandidates.length > 1) {
-        // TIE PROTOCOL TRIGGERED
-        setTieData({ isTie: true, candidates: topCandidates });
-        return;
-      }
-
-      const winnerId = topCandidates[0]?.id;
-
-      // 4. Persist winner and reveal
-      if (winnerId) {
-        // Update position winner
-        const { error: winErr } = await supabase
-          .from("positions")
-          .update({ winner_id: winnerId })
-          .eq("id", settings.current_position_id);
-        if (winErr) throw winErr;
-
-        // Automatically eliminate winner from the pool for next rounds
-        const { error: memErr } = await supabase
-          .from("members")
-          .update({ 
-            is_nominee: false,
-            eliminated: true 
-          })
-          .eq("id", winnerId);
-        
-        if (memErr) console.warn("Registry Elimination Halt:", memErr.message);
-        console.log(`Candidate ${winnerId} has been successfully ELIMINATED from future pools.`);
-      }
-
-      await updateSettings({ status: "REVEALED" });
-      await refetchData();
-
-      const winnerName = members.find((m) => m.id === winnerId)?.name;
-      if (winnerName)
-        alert(
-          `ELECTION RESULT: ${winnerName} has been elected as ${currentPos?.name}. They have been removed from the remaining candidate pools.`,
-        );
+      
     } catch (e) {
       console.error("Transmission Halt:", e.message);
       setErrorMsg(`Workflow Error: ${e.message}`);
@@ -468,42 +493,65 @@ export default function Admin() {
     }
   };
 
-  const resolveTie = async (winnerId, winnerName) => {
+  const finalizeWinner = async (winnerId, isManual = false) => {
     setActionLoading(true);
     setErrorMsg("");
     try {
-      if (!settings?.current_position_id)
-        throw new Error("Null pointer: No active position identified.");
+      if (!settings?.current_position_id) throw new Error("No active position");
 
-      // 1. Manually resolve winner with 'decided_by_admin' flag
+      const winner = members.find(m => m.id === winnerId);
+      if (!winner) throw new Error("Candidate identification failure");
+
+      // 1. If manual override, record the decision
+      if (isManual) {
+        await supabase.from('manual_decisions').insert({
+          role: currentPos?.name,
+          selected_winner_email: winner.email,
+          selected_winner_name: winner.name,
+          reason: "Admin Manual Override"
+        });
+      }
+
+      // 2. Update Position table
       const { error: winErr } = await supabase
         .from("positions")
         .update({ winner_id: winnerId })
         .eq("id", settings.current_position_id);
       if (winErr) throw winErr;
 
-      // 2. Remove winner from future pools (as they are now the elected official)
-      const { error: memErr } = await supabase
+      // 3. Eliminate winner from registry
+      await supabase
         .from("members")
-        .update({ 
-          is_nominee: false,
-          eliminated: true 
-        })
+        .update({ is_nominee: false, eliminated: true })
         .eq("id", winnerId);
+
+
+      // 4. Update election results summary
+      // We need to fetch current round votes to store in results
+      const { data: finalVotes } = await supabase
+        .from("votes")
+        .select("id")
+        .eq("position_id", settings.current_position_id)
+        .eq("round_number", settings.round_number);
+
+      await supabase.from('election_results').insert({
+        role: currentPos?.name,
+        winner_name: winner.name,
+        winner_email: winner.email,
+        votes: finalVotes?.length || 0
+      });
+
+      // 5. Finalize state
+      await updateSettings({ 
+        status: "REVEALED",
+        winner_locked: true
+      });
       
-      if (memErr) console.warn("Registry Elimination Halt:", memErr.message);
-
-      // 3. Move election status forward
-      await updateSettings({ status: "REVEALED" });
       await refetchData();
-      setTieData({ isTie: false, candidates: [] });
-
-      alert(
-        `ADMIN OVERRIDE: ${winnerName} has been manually selected as ${currentPos?.name}. Registry synchronized.`,
-      );
+      alert(`CONFIRMED: ${winner.name} is the winner.`);
     } catch (e) {
-      console.error("Conflict Resolution Fault:", e.message);
-      setErrorMsg(`Tie-Break Error: ${e.message}`);
+      console.error("Finalization Fault:", e);
+      setErrorMsg(`Finalization Fault: ${e.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -512,30 +560,67 @@ export default function Admin() {
   const nextRole = async () => {
     setActionLoading(true);
     try {
-      if (!settings) {
-        throw new Error("Registry settings not synchronized.");
-      }
-
-      const currentIndex = positions.findIndex(
-        (p) => p.id === settings?.current_position_id,
-      );
-      const nextPos = positions[currentIndex + 1];
-
-      if (nextPos) {
+      // Find following position without a winner
+      const nextOne = positions.find(p => !p.winner_id);
+      
+      if (nextOne) {
         await updateSettings({
-          status: "VOTING",
-          current_position_id: nextPos.id,
+          status: "SETUP",
+          current_position_id: nextOne.id,
+          round_number: 1,
+          winner_locked: false
         });
+        await syncSystem(false);
       } else {
         await updateSettings({ status: "FINISHED" });
       }
     } catch (e) {
-      console.error("Workflow Shift Failure:", e);
-      setErrorMsg(`Workflow Shift Failure: ${e.message}`);
+      console.error("Phase Transition Fault:", e);
     } finally {
       setActionLoading(false);
     }
   };
+
+  const startAnotherRound = async () => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    setErrorMsg("");
+    try {
+      const nextRound = (settings?.round_number || 1) + 1;
+      
+      // 1. CLEAR previous votes for this position as per protocol
+      console.log(`[PROTOCOL] Clearing position-specific votes for Round ${nextRound} reset.`);
+      await supabase
+        .from("votes")
+        .delete()
+        .eq("position_id", settings.current_position_id);
+
+      // 2. Update settings to new round
+      await updateSettings({
+        round_number: nextRound,
+        status: "VOTING",
+        winner_locked: false
+      });
+
+      // 3. BROADCAST a signal to all clients to force-sync
+      const channel = supabase.channel('bwt_realtime_sync');
+      await channel.send({
+        type: 'broadcast',
+        event: 'ROUND_INCREMENT',
+        payload: { round: nextRound }
+      });
+
+      // 4. Force Global Sync
+      await syncSystem(false);
+      
+    } catch (e) {
+      console.error("Round Initialization Fault:", e);
+      setErrorMsg(`Round Initialization Fault: ${e.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-20 mt-8 font-sans">
@@ -600,7 +685,7 @@ export default function Admin() {
                   Phase
                 </span>
                 <span className="text-xs font-bold text-slate-900">
-                  {currentPos?.name || "N/A"}
+                  {currentPos?.name || "President"}
                 </span>
               </div>
               <div className="flex justify-between items-center bg-slate-50 px-2 py-1.5 rounded border border-slate-100">
@@ -617,14 +702,14 @@ export default function Admin() {
               </div>
             </div>
 
-            <div className="space-y-2 border-t border-slate-100 pt-3">
+            <div className="space-y-4 border-t border-slate-100 pt-3">
               {settings?.status === "SETUP" && (
                 <button
                   disabled={actionLoading}
                   onClick={startElection}
-                  className="w-full h-8 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-500 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  className="w-full h-10 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
                 >
-                  <Play className="w-3 h-3" /> Start Voting
+                  <Play className="w-4 h-4 fill-current" /> Start Voting
                 </button>
               )}
               {settings?.status === "VOTING" && (
@@ -635,6 +720,28 @@ export default function Admin() {
                 >
                   <X className="w-4 h-4" /> Stop Voting Session
                 </button>
+              )}
+              {settings?.status === "MANUAL_REVIEW" && (
+                <div className="space-y-4 pt-4 border-t border-slate-100">
+                  <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                    <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-2">Governance Phase</h4>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight mb-3 opacity-60">Round {settings.round_number} Tally Ready</p>
+                    <button
+                      disabled={actionLoading}
+                      onClick={() => setShowManualReview(true)}
+                      className="w-full h-10 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 transition shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+                    >
+                      <Hash className="w-4 h-4" /> Review Results
+                    </button>
+                  </div>
+                  <button
+                    disabled={actionLoading}
+                    onClick={startAnotherRound}
+                    className="w-full h-10 border-2 border-slate-100 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Start New Round
+                  </button>
+                </div>
               )}
               {settings?.status === "REVEALED" && (
                 <button
@@ -725,145 +832,21 @@ export default function Admin() {
             </div>
 
             <div className="divide-y divide-slate-100 overflow-y-auto max-h-[700px]">
-              {filteredMembers.map((m) => {
-                const isWinner = wonIds.includes(m.id);
-                const isMemberAdmin = m.is_admin;
-                const isDisabled = actionLoading || isMemberAdmin || isWinner;
-
-                return (
-                  <div
-                    key={m.id}
-                    className={cn(
-                      "p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition border-b border-slate-50 last:border-0",
-                      isMemberAdmin ? "bg-slate-50/80" : "hover:bg-slate-50/50",
-                    )}
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div
-                        className={cn(
-                          "w-10 h-10 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0",
-                          isMemberAdmin
-                            ? "bg-slate-900 text-white"
-                            : "bg-slate-100 text-slate-500",
-                        )}
-                      >
-                        {m.name.charAt(0)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                          <p className="text-sm font-bold text-slate-900 leading-none truncate">
-                            {m.name}
-                          </p>
-                          <div className="flex gap-1">
-                            {isMemberAdmin && (
-                              <Badge
-                                variant="blue"
-                                size="xs"
-                                className="text-[7px] py-0 px-1 opacity-70"
-                              >
-                                ADMIN
-                              </Badge>
-                            )}
-                            {getWinnerRole(m.id) && (
-                              <Badge
-                                variant="success"
-                                size="xs"
-                                className="text-[7px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-100 font-bold"
-                              >
-                                ELECTED: {getWinnerRole(m.id)}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <p className="text-[10px] sm:text-xs text-slate-500 truncate mt-1 sm:mt-0">
-                          {m.email}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between sm:justify-end gap-6 shrink-0 bg-slate-50/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
-                      <div className="flex items-center gap-4 sm:gap-6">
-                        {/* Voter Toggle */}
-                        {!isMemberAdmin && (
-                          <div className="flex flex-col items-center">
-                            <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
-                              Voter
-                            </span>
-                            <button
-                              disabled={pendingId === m.id || isVotingActive}
-                              onClick={async () => await toggleEligible(m)}
-                              className={cn(
-                                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-                                m.is_eligible ? "bg-emerald-500" : "bg-slate-200",
-                                (pendingId === m.id || isVotingActive) && "opacity-40 cursor-not-allowed"
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                                  (pendingId === m.id) && "animate-pulse",
-                                  m.is_eligible ? "translate-x-5" : "translate-x-0"
-                                )}
-                              />
-                            </button>
-                          </div>
-                        )}
-
-                        <div className="w-px h-8 bg-slate-200" />
-
-                        {/* Nominee Toggle */}
-                        {!isMemberAdmin && (
-                          <div className="flex flex-col items-center">
-                            <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
-                              Nominee
-                            </span>
-                            <button
-                              disabled={isVotingActive || isWinner || !m.is_eligible || pendingId === m.id}
-                              onClick={async () => await updateMember(m.id, { is_nominee: !m.is_nominee })}
-                              className={cn(
-                                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
-                                m.is_nominee && m.is_eligible ? "bg-indigo-600" : "bg-slate-200",
-                                (isVotingActive || isWinner || !m.is_eligible || pendingId === m.id) && "opacity-40 cursor-not-allowed"
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                                  (pendingId === m.id) && "animate-pulse",
-                                  m.is_nominee && m.is_eligible ? "translate-x-5" : "translate-x-0"
-                                )}
-                              />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="w-px h-8 bg-slate-200 hidden sm:block" />
-
-                      {!isMemberAdmin && !isWinner && (
-                        <button
-                          disabled={isVotingActive || pendingId === m.id}
-                          onClick={async () => await transferAdmin(m)}
-                          className="p-2 text-slate-400 hover:text-indigo-600 transition-all hover:bg-indigo-50 rounded-lg group"
-                          title="Transfer Admin Access"
-                        >
-                          <Shield className={cn("w-5 h-5 group-hover:fill-indigo-500", pendingId === m.id && "animate-spin")} />
-                        </button>
-                      )}
-
-                      <button
-                        disabled={isVotingActive || pendingId === m.id}
-                        onClick={() =>
-                          setShowConfirmModal({ id: m.id, name: m.name })
-                        }
-                        className="p-2 text-slate-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-lg"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              {filteredMembers.map((m) => (
+                <MemberRow 
+                  key={m.id}
+                  member={m}
+                  isWinner={wonIds.includes(m.id)}
+                  isVotingActive={isVotingActive}
+                  getWinnerRole={getWinnerRole}
+                  toggleEligible={toggleEligible}
+                  updateMember={updateMember}
+                  localLoadingMap={localLoadingMap}
+                  transferAdmin={transferAdmin}
+                  setShowConfirmModal={setShowConfirmModal}
+                  pendingId={pendingId}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -877,14 +860,296 @@ export default function Admin() {
         onConfirm={() => deleteMember(showConfirmModal?.id)}
       />
 
-      <TieBreakModal
-        isOpen={tieData.isTie}
-        candidates={tieData.candidates}
-        roleName={currentPos?.name}
-        onClose={() => setTieData({ isTie: false, candidates: [] })}
-        onSelect={resolveTie}
-        isProcessing={actionLoading}
-      />
+      {/* MANUAL REVIEW MODAL */}
+      <AnimatePresence>
+        {showManualReview && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 overflow-hidden"
+            >
+              <div className="p-10">
+                <div className="flex justify-between items-start mb-10">
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <h2 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.4em]">Election Governance</h2>
+                      {settings.round_number > 1 && (
+                        <span className="text-[8px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-black uppercase tracking-widest border border-slate-200">
+                          Follows {settings.round_number - 1} Runoffs
+                        </span>
+                      )}
+                    </div>
+                    <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">
+                      {currentPos?.name || 'Position Review'}
+                    </h1>
+                  </div>
+                  <button onClick={() => setShowManualReview(false)} className="p-2 hover:bg-slate-50 rounded-full transition-colors">
+                    <X className="w-6 h-6 text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-6 mb-10">
+                  <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50 pb-4">
+                    <span>Candidates (Round {settings.round_number})</span>
+                    <span>Tally Summary</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2">
+                    {members.filter(m => m.is_nominee && !wonIds.includes(m.id)).map(m => {
+                      const vCount = modalTally[m.id] || 0;
+                      const maxV = Math.max(...Object.values(modalTally), 0);
+                      const topCandidates = Object.entries(modalTally).filter(([id, count]) => count === maxV);
+                      const isTie = topCandidates.length > 1;
+                      const isNaturalWinner = !isTie && m.id === topCandidates[0]?.[0];
+                      const isSelected = manualSelection === m.id || (isNaturalWinner && !manualSelection);
+                      const isTiedCandidate = isTie && vCount === maxV && maxV > 0;
+
+                      return (
+                        <button
+                          key={m.id}
+                          disabled={!isTie && !isNaturalWinner}
+                          onClick={() => isTie && setManualSelection(m.id)}
+                          className={cn(
+                            "flex items-center justify-between p-4 rounded-2xl border transition-all text-left",
+                            isSelected 
+                              ? "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-100" 
+                              : "bg-slate-50 border-transparent hover:border-slate-200 text-slate-900",
+                            isTiedCandidate && !isSelected && "border-amber-200 bg-amber-50/50",
+                            !isTie && !isNaturalWinner && "opacity-40 grayscale-[0.5]"
+                          )}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black",
+                              isSelected ? "bg-white/20" : "bg-white shadow-sm"
+                            )}>
+                              {m.name.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="font-black text-sm">{m.name}</p>
+                              {isTiedCandidate && <p className={cn("text-[8px] font-black uppercase tracking-widest mt-1", isSelected ? "text-white/70" : "text-amber-600")}>⚠️ Tie Detected</p>}
+                              {isNaturalWinner && <p className={cn("text-[8px] font-black uppercase tracking-widest mt-1", isSelected ? "text-white/70" : "text-emerald-500")}>✨ Clear Winner</p>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={cn("text-xl font-black", isSelected ? "text-white" : "text-indigo-600")}>{vCount}</span>
+                            <span className={cn("text-[9px] font-bold uppercase opacity-60", isSelected ? "text-white" : "text-slate-400")}>Votes</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Logic for Tie / No Tie footer */}
+                  {(() => {
+                    const maxV = Math.max(...Object.values(modalTally), 0);
+                    const topCandidates = Object.entries(modalTally).filter(([id, count]) => count === maxV);
+                    const isTie = topCandidates.length > 1;
+
+                    if (!isTie && topCandidates.length === 1) {
+                      const winId = topCandidates[0][0];
+                      const winName = members.find(m => m.id === winId)?.name;
+                      return (
+                        <div className="flex flex-col gap-4">
+                          <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-between">
+                             <div className="flex items-center gap-3">
+                                <div className="p-2 bg-emerald-500 text-white rounded-lg"><CheckCircle2 className="w-4 h-4" /></div>
+                                <div>
+                                   <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none mb-1">Winner Declared Automatically</p>
+                                   <p className="text-sm font-black text-slate-900">{winName} secured a majority.</p>
+                                </div>
+                             </div>
+                             <span className="text-xs font-black text-emerald-600 bg-white px-3 py-1 rounded-full border border-emerald-100">{maxV} Votes</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                                finalizeWinner(winId, false);
+                                setShowManualReview(false);
+                            }}
+                            className="h-14 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"
+                          >
+                            Finalize Election Cycle
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (isTie) {
+                      return (
+                        <div className="grid grid-cols-2 gap-4">
+                           <button
+                             disabled={!manualSelection || actionLoading}
+                             onClick={() => {
+                                const maxVotes = Math.max(...Object.values(modalTally), 0);
+                                const naturalWinnerId = Object.entries(modalTally).find(([id, count]) => count === maxVotes)?.[0];
+                                finalizeWinner(manualSelection, true);
+                                setShowManualReview(false);
+                             }}
+                             className="h-14 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 disabled:opacity-30 transition-all flex items-center justify-center gap-2 shadow-xl"
+                           >
+                             <AlertTriangle className="w-4 h-4" /> Apply Manual Override
+                           </button>
+                           <button
+                             onClick={async () => {
+                                await startAnotherRound();
+                                setShowManualReview(false);
+                             }}
+                             className="h-14 bg-indigo-50 text-indigo-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
+                           >
+                             <RefreshCw className="w-4 h-4" /> Run Runoff Round
+                           </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
+                         <p className="text-xs font-bold text-slate-400">Waiting for ballots to be audited...</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+const MemberRow = memo(({ member: m, isWinner, isVotingActive, getWinnerRole, toggleEligible, updateMember, localLoadingMap, transferAdmin, setShowConfirmModal, pendingId }) => {
+  const isMemberAdmin = m.is_admin;
+  const isLocalLoading = localLoadingMap[m.id];
+
+  return (
+    <div
+      className={cn(
+        "p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition border-b border-slate-50 last:border-0",
+        isMemberAdmin ? "bg-slate-50/80" : "hover:bg-slate-50/50",
+      )}
+    >
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        <div
+          className={cn(
+            "w-10 h-10 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0",
+            isMemberAdmin
+              ? "bg-slate-900 text-white"
+              : "bg-slate-100 text-slate-500",
+          )}
+        >
+          {m.name.charAt(0)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <p className="text-sm font-bold text-slate-900 leading-none truncate">
+              {m.name}
+            </p>
+            <div className="flex gap-1">
+              {isMemberAdmin && (
+                <Badge
+                  variant="blue"
+                  size="xs"
+                  className="text-[7px] py-0 px-1 opacity-70"
+                >
+                  ADMIN
+                </Badge>
+              )}
+              {getWinnerRole(m.id) && (
+                <Badge
+                  variant="success"
+                  size="xs"
+                  className="text-[7px] py-0 px-1.5 bg-emerald-50 text-emerald-600 border-emerald-100 font-bold"
+                >
+                  ELECTED: {getWinnerRole(m.id)}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] sm:text-xs text-slate-500 truncate mt-1 sm:mt-0">
+            {m.email}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between sm:justify-end gap-6 shrink-0 bg-slate-50/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
+        <div className="flex items-center gap-4 sm:gap-6">
+          {!isMemberAdmin && (
+            <div className="flex flex-col items-center">
+              <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
+                Voter
+              </span>
+              <button
+                disabled={isLocalLoading || isVotingActive}
+                onClick={async () => await toggleEligible(m)}
+                className={cn(
+                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+                  m.is_eligible ? "bg-emerald-500" : "bg-slate-200",
+                  isLocalLoading && "opacity-50 cursor-wait"
+                )}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                    m.is_eligible ? "translate-x-5" : "translate-x-0"
+                  )}
+                />
+              </button>
+            </div>
+          )}
+
+          {!isMemberAdmin && (
+            <div className="flex flex-col items-center">
+              <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
+                Nominee
+              </span>
+              <button
+                disabled={isLocalLoading || !m.is_eligible || isWinner || isVotingActive}
+                onClick={async () => await updateMember(m.id, { is_nominee: !m.is_nominee })}
+                className={cn(
+                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
+                  m.is_nominee ? "bg-indigo-600" : "bg-slate-200",
+                  (isLocalLoading || !m.is_eligible) && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                    m.is_nominee ? "translate-x-5" : "translate-x-0"
+                  )}
+                />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="w-px h-8 bg-slate-200 hidden sm:block" />
+
+        <div className="flex items-center gap-1">
+          {!isMemberAdmin && !isWinner && (
+            <button
+              disabled={isVotingActive || pendingId === m.id}
+              onClick={async () => await transferAdmin(m)}
+              className="p-2 text-slate-400 hover:text-indigo-600 transition-all hover:bg-indigo-50 rounded-lg group"
+              title="Transfer Admin Access"
+            >
+              <Shield className={cn("w-5 h-5 group-hover:fill-indigo-500", pendingId === m.id && "animate-spin")} />
+            </button>
+          )}
+
+          <button
+            disabled={isVotingActive || pendingId === m.id}
+            onClick={() => setShowConfirmModal({ id: m.id, name: m.name })}
+            className="p-2 text-slate-400 hover:text-red-500 transition-all hover:bg-red-50 rounded-lg"
+          >
+            <Trash2 className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});

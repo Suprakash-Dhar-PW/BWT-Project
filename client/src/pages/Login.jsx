@@ -3,29 +3,37 @@ import { supabase } from '../lib/supabase'
 import { useStore } from '../store/useStore'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ShieldCheck, Mail, ArrowRight, Loader2, Sparkles, Hash, AlertTriangle, RefreshCw } from 'lucide-react'
+import { 
+  ShieldCheck, 
+  Mail, 
+  ArrowRight, 
+  Loader2, 
+  Hash, 
+  AlertTriangle, 
+  RefreshCw,
+  Lock,
+  ChevronLeft
+} from 'lucide-react'
 
-import Button from '../components/Button'
-import Card from '../components/Card'
 import { cn } from '../lib/utils'
 
 export default function Login() {
   const [email, setEmail] = useState('')
-  const [token, setToken] = useState('')
+  const [token, setToken] = useState(['', '', '', '', '', '', '', '']) // 8 digits
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState('email') // email or verify
   const [errorMsg, setErrorMsg] = useState('')
   const [cooldown, setCooldown] = useState(0)
+  
   const signIn = useStore(state => state.signIn)
   const verifyOtp = useStore(state => state.verifyOtp)
   const user = useStore(state => state.user)
   const memberData = useStore(state => state.memberData)
   
   const navigate = useNavigate()
-  const inputRef = useRef(null)
+  const otpInputs = useRef([])
 
   useEffect(() => {
-    // Critical: only redirect if user AND their member registry record are confirmed
     if (user && memberData) {
        navigate('/dashboard')
     }
@@ -41,10 +49,11 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault()
+    if (!email) return
+
     setLoading(true)
-    
     setErrorMsg('')
-    // Check if email belongs to a member first for better UX
+    
     const { data: member } = await supabase.from('members').select('id').eq('email', email.trim().toLowerCase()).single()
     
     if (!member) {
@@ -57,27 +66,61 @@ export default function Login() {
       setErrorMsg(`Authentication Fault: ${error.message}`)
     } else {
       setStep('verify')
-      setCooldown(30)
+      setCooldown(60)
     }
     setLoading(false)
   }
 
+  const handleOtpChange = (index, value) => {
+    if (isNaN(value)) return
+    
+    const newToken = [...token]
+    newToken[index] = value.slice(-1)
+    setToken(newToken)
+
+    if (value && index < 7) {
+      otpInputs.current[index + 1].focus()
+    }
+  }
+
+  const handleKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !token[index] && index > 0) {
+      otpInputs.current[index - 1].focus()
+    }
+  }
+
+  const handlePaste = (e) => {
+    e.preventDefault()
+    const pasteData = e.clipboardData.getData('text').slice(0, 8).split('')
+    if (pasteData.every(char => !isNaN(char))) {
+      const newToken = [...token]
+      pasteData.forEach((char, i) => {
+        if (i < 8) newToken[i] = char
+      })
+      setToken(newToken)
+      if (pasteData.length === 8) {
+        otpInputs.current[7].focus()
+      }
+    }
+  }
+
   const handleVerify = async (e) => {
     e?.preventDefault()
-    if (token.length < 6) return
+    const finalToken = token.join('')
+    if (finalToken.length < 8) return
     
     setLoading(true)
     setErrorMsg('')
-    const { error, memberData: verifiedData } = await verifyOtp(email.trim().toLowerCase(), token)
+    const { error, memberData: verifiedData } = await verifyOtp(email.trim().toLowerCase(), finalToken)
     if (error) {
        setErrorMsg(`Verification Failed: ${error.message}`)
-       setToken('')
+       setToken(['', '', '', '', '', '', '', ''])
+       otpInputs.current[0].focus()
     } else if (verifiedData) {
-       // All users land on dashboard for a unified start experience
        navigate('/dashboard')
     } else {
        setErrorMsg(`Authorization Error: Member registry check failed.`)
-       setToken('')
+       setToken(['', '', '', '', '', '', '', ''])
        setStep('email')
     }
     setLoading(false)
@@ -89,145 +132,168 @@ export default function Login() {
     setErrorMsg('')
     const { error } = await signIn(email.trim().toLowerCase())
     if (!error) {
-      setCooldown(30)
-      setToken('')
+      setCooldown(60)
+      setToken(['', '', '', '', '', '', '', ''])
     }
     setLoading(false)
   }
 
+  useEffect(() => {
+    if (token.join('').length === 8 && step === 'verify' && !loading) {
+      handleVerify()
+    }
+  }, [token])
+
   return (
-    <div className="min-h-[80vh] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50/50 flex items-center justify-center p-6 selection:bg-indigo-100 selection:text-indigo-900 antialiased font-sans">
       <AnimatePresence mode="wait">
         {step === 'email' ? (
           <motion.div
             key="email-step"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="w-full max-w-md"
+            exit={{ opacity: 0, y: -10 }}
+            className="w-full max-w-[400px]"
           >
-            <Card className="p-10 border-slate-200 shadow-2xl bg-white relative overflow-hidden" hover={false}>
-               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/50 blur-3xl rounded-full translate-x-16 -translate-y-16" />
-               
-               <div className="relative z-10">
-                 <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-10 shadow-xl group">
-                    <ShieldCheck className="w-8 h-8 text-white group-hover:scale-110 transition-transform" />
-                 </div>
-                 
-                 <h2 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.4em] mb-4">Personnel Authentication</h2>
-                 <h1 className="text-4xl font-black text-slate-900 uppercase tracking-tighter mb-8 leading-[0.9]">
-                    System <br/>
-                    <span className="text-blue-600 italic">Clearance</span>
-                 </h1>
+            <div className="bg-white rounded-[2rem] shadow-[0_12px_48px_-8px_rgba(0,0,0,0.06)] border border-slate-100 p-10 md:p-12 text-center">
+              
+              {/* BRANDING */}
+              <div className="mb-10">
+                <img 
+                  src="/bwt.png" 
+                  alt="BWT LOGO" 
+                  className="w-16 h-16 mx-auto mb-6 object-contain filter drop-shadow-sm" 
+                />
+                <h1 className="text-xl font-black text-slate-900 tracking-tight uppercase leading-none mb-1 text-center">
+                  BWT PROTOCOL
+                </h1>
+                <p className="text-xs font-medium text-slate-400">Secure Voting Access</p>
+              </div>
 
-                 <form onSubmit={handleLogin} className="space-y-6">
-                    {errorMsg && (
-                       <div className="p-3 bg-red-50 text-red-600 text-[10px] font-bold uppercase tracking-widest rounded-xl text-center border border-red-100">
-                          {errorMsg}
-                       </div>
-                    )}
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Email Identifier</label>
-                       <div className="relative group">
-                          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                             <Mail className="w-4 h-4 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
-                          </div>
-                          <input
-                             required
-                             type="email"
-                             value={email}
-                             onChange={(e) => setEmail(e.target.value)}
-                             placeholder="name@domain.com"
-                             className="w-full h-14 bg-slate-50 border border-slate-200 pl-12 pr-4 rounded-2xl text-sm font-bold text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all"
-                          />
-                       </div>
+              <form onSubmit={handleLogin} className="space-y-6">
+                {errorMsg && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-4 bg-rose-50 border border-rose-100 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center gap-3 text-left"
+                  >
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    {errorMsg}
+                  </motion.div>
+                )}
+
+                <div className="text-left space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Registry Identifier</label>
+                  <div className="relative group">
+                    <input
+                      required
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="identity@bwt.local"
+                      className="w-full h-14 bg-slate-50 border border-slate-50 focus:bg-white focus:border-slate-200 px-6 rounded-2xl text-sm font-bold text-slate-900 placeholder:text-slate-300 focus:outline-none transition-all group-hover:border-slate-200"
+                    />
+                    <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-300">
+                      <Mail className="w-4 h-4" />
                     </div>
+                  </div>
+                </div>
 
-                    <Button 
-                      type="submit" 
-                      loading={loading} 
-                      icon={ArrowRight}
-                      className="w-full h-14 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 shadow-xl"
-                    >
-                      Initialize Access
-                    </Button>
-                 </form>
-               </div>
-            </Card>
+                <button 
+                  type="submit" 
+                  disabled={loading || !email}
+                  className="w-full h-14 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-slate-100 hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Access System"}
+                  {!loading && <ArrowRight className="w-4 h-4" />}
+                </button>
+
+                <div className="flex items-center justify-center gap-2 pt-6 border-t border-slate-50 opacity-40">
+                  <Lock className="w-3 h-3 text-slate-400" />
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Authorized Personnel Only</span>
+                </div>
+              </form>
+            </div>
           </motion.div>
         ) : (
           <motion.div
             key="verify-step"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-md"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            className="w-full max-w-[480px]"
           >
-            <Card className="p-10 border-slate-200 shadow-2xl bg-white relative overflow-hidden text-center" hover={false}>
-               <div className="mx-auto w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-8 shadow-xl shadow-blue-100">
-                  <Hash className="w-8 h-8 text-white" />
-               </div>
+            <div className="bg-white rounded-[2rem] shadow-[0_12px_48px_-8px_rgba(0,0,0,0.06)] border border-slate-100 p-10 md:p-14 text-center">
+              
+              <button 
+                onClick={() => setStep('email')}
+                className="mb-10 text-[9px] font-black text-slate-300 hover:text-indigo-600 uppercase tracking-widest flex items-center gap-2 transition-colors mx-auto"
+              >
+                <ChevronLeft className="w-3 h-3" /> Step Back
+              </button>
 
-               <h2 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.4em] mb-4">Security Challenge</h2>
-               <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-4 leading-none text-center">
-                  Passcode Required
-               </h1>
-               <p className="text-slate-500 text-[11px] font-medium leading-relaxed mb-10 uppercase tracking-widest max-w-[240px] mx-auto">
-                 Enter the unique 6-digit sequence dispatched to your registry email.
-               </p>
+              <div className="mb-10">
+                <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <Hash className="w-6 h-6 text-indigo-500" />
+                </div>
+                <h1 className="text-xl font-black text-slate-900 uppercase leading-none mb-2 tracking-tight text-center">
+                  Identity Verification
+                </h1>
+                <p className="text-xs font-medium text-slate-400 text-center">Passcode en-route to <span className="text-slate-900 font-bold">{email}</span></p>
+              </div>
 
-               <div className="space-y-8">
-                  {errorMsg && (
-                     <div className="p-3 bg-red-50 text-red-600 text-[10px] font-bold uppercase tracking-widest rounded-xl text-center border border-red-100">
-                        {errorMsg}
-                     </div>
-                  )}
-                  <div className="relative">
-                     <input
-                        ref={inputRef}
-                        type="text"
-                        maxLength={10}
-                        value={token}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/\D/g, '')
-                          setToken(val)
-                          if (val.length >= 6) {
-                            // Automatically attempt verification as a fallback but allow manual submit
-                          }
-                        }}
-                        autoFocus
-                        className="w-full h-20 bg-slate-50 border-2 border-slate-200 rounded-3xl text-center text-4xl font-black tracking-[0.5em] text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-50 transition-all"
-                        placeholder="000000"
-                     />
-                  </div>
+              <div className="space-y-10">
+                {errorMsg && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-rose-50 border border-rose-100 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-3 text-left"
+                  >
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    {errorMsg}
+                  </motion.div>
+                )}
 
-                  <div className="grid grid-cols-2 gap-4">
-                     <button 
-                       onClick={() => setStep('email')} 
-                       className="h-14 border border-slate-100 hover:bg-slate-50 text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
-                     >
-                       Change Email
-                     </button>
-                     <Button 
-                       onClick={handleVerify} 
-                       loading={loading}
-                       className="h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-100"
-                     >
-                       Verify Identity
-                     </Button>
-                  </div>
+                <div className="flex justify-between gap-2 max-w-[340px] mx-auto" onPaste={handlePaste}>
+                  {token.map((digit, idx) => (
+                    <input
+                      key={idx}
+                      ref={el => otpInputs.current[idx] = el}
+                      type="text"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(idx, e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(idx, e)}
+                      autoFocus={idx === 0}
+                      className={cn(
+                        "w-9 h-14 md:w-11 md:h-16 text-center text-lg font-black rounded-xl border-2 transition-all outline-none",
+                        digit ? "bg-slate-50 border-slate-200 text-slate-900" : "bg-slate-50/50 border-transparent focus:border-indigo-100 text-slate-900"
+                      )}
+                    />
+                  ))}
+                </div>
 
-                  <div className="pt-6 border-t border-slate-50">
-                     <button
-                        onClick={handleResend}
-                        disabled={cooldown > 0 || loading}
-                        className="flex items-center gap-2 mx-auto text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-blue-600 disabled:opacity-50 transition-colors"
-                     >
-                        <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
-                        {cooldown > 0 ? `Retry in ${cooldown}s` : 'Request New Token'}
-                     </button>
-                  </div>
-               </div>
-            </Card>
+                <div className="space-y-4">
+                  <button 
+                    onClick={handleVerify} 
+                    disabled={loading || token.join('').length < 8}
+                    className="w-full h-14 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-slate-100 hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin mr-3 inline" /> : null}
+                    {loading ? "Decrypting Access..." : "Verify Identity"}
+                  </button>
+
+                  <button
+                    onClick={handleResend}
+                    disabled={cooldown > 0 || loading}
+                    className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-300 hover:text-indigo-600 disabled:opacity-30 transition-colors flex items-center justify-center gap-2 mx-auto"
+                  >
+                    <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} />
+                    {cooldown > 0 ? `Retry in ${cooldown}s` : "Resend Security Token"}
+                  </button>
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

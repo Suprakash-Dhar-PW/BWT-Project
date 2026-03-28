@@ -41,15 +41,18 @@ export default function Voting() {
     return members.filter(m => 
       !m.is_admin && 
       m.is_nominee && 
-      !m.eliminated && // Explicit Elimination Flag
-      !previousWinners.includes(m.id) // Cross-reference Backup
+      !previousWinners.includes(m.id)
     )
   }, [currentPos, members, positions])
 
-  // 3. Cryptographically derive voter hash and check for existing ballot
+  // 3. Round-aware voter verification
   const hasVoted = useMemo(() => {
     if (!voterHash || !votes || !settings) return false
-    return votes.some(v => v.voter_hash === voterHash && v.position_id === settings.current_position_id)
+    return votes.some(v => 
+      v.voter_hash === voterHash && 
+      v.position_id === settings.current_position_id &&
+      v.round_number === (settings.round_number || 1)
+    )
   }, [voterHash, votes, settings])
 
   useEffect(() => {
