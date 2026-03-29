@@ -55,6 +55,9 @@ export default function Navbar() {
               <span className="text-[8px] font-black text-blue-600 uppercase tracking-[0.3em] leading-none mt-1">
                 Protocol
               </span>
+              <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1 opacity-50">
+                Version: v2.0
+              </span>
             </div>
           </Link>
 
