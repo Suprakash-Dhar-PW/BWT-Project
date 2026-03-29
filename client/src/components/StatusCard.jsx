@@ -53,10 +53,10 @@ export default function StatusCard({ settings, currentPos, memberData }) {
                </div>
             )}
             
-            {memberData?.is_eligible ? (
+            {memberData?.is_voter ? (
                <div className="flex items-center gap-2 px-5 p-2 bg-emerald-50 border border-emerald-100 rounded-full">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Election Cleared</span>
+                  <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Voter Access Cleared</span>
                </div>
             ) : (
                <div className="flex items-center gap-2 px-5 p-2 bg-amber-50 border border-amber-100 rounded-full">

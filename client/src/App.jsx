@@ -36,9 +36,9 @@ export default function App() {
     // 🔥 LIVE PROTOCOL: GLOBAL REAL-TIME SUBSCRIPTION
     const channel = supabase.channel('live-election')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
-          console.log("[REALTIME] Settings Sync", payload.new);
-          if (payload.new) useStore.setState({ settings: payload.new });
-          syncSystem(true);
+          console.log("[REALTIME] Settings Sync Pulse:", payload.eventType);
+          // Always perform a forced sync on settings updates to ensure correct status
+          syncSystem(false, true);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, () => {
           console.log("[REALTIME] Vote Detected");
@@ -48,10 +48,21 @@ export default function App() {
           console.log("[REALTIME] Registry Update");
           syncSystem(true);
       })
+      .on('broadcast', { event: 'START_VOTING' }, (payload) => {
+          console.log("[REALTIME] Broadcast Activation:", payload);
+          // Atomic forced sync on high-priority activation event
+          syncSystem(false, true);
+      })
       .subscribe();
+
+    // 💓 PROTOCOL HEARTBEAT: High-frequency polling (5s) for critical administration phases.
+    const heartbeat = setInterval(() => {
+      syncSystem(true);
+    }, 5000);
 
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(heartbeat);
     }
   }, [init, syncSystem])
 

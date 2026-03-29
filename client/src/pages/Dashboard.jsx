@@ -49,7 +49,7 @@ export default function Dashboard() {
 
     return {
       totalMembers: filteredMembers.filter(m => !m.is_admin).length,
-      eligibleVoters: filteredMembers.filter(m => !m.is_admin && m.is_eligible).length,
+      votersReady: filteredMembers.filter(m => !m.is_admin && m.is_voter).length,
       votesCast: currentVotes.length,
       nomineesCount: activeNominees.length
     }
@@ -133,7 +133,7 @@ export default function Dashboard() {
       {/* 📊 STATS SECTION */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
         <StatItem label="Total Members" value={stats.totalMembers} icon={Users} color="slate" delay={0.1} />
-        <StatItem label="Voters Ready" value={stats.eligibleVoters} icon={CheckCircle2} color="emerald" delay={0.15} />
+        <StatItem label="Voters Ready" value={stats.votersReady} icon={CheckCircle2} color="emerald" delay={0.15} />
         <StatItem label="Nominees" value={stats.nomineesCount} icon={UserCheck} color="indigo" delay={0.2} />
         <StatItem label="Votes Cast" value={stats.votesCast} icon={Vote} color="blue" delay={0.25} />
       </div>
@@ -177,14 +177,14 @@ export default function Dashboard() {
                 <div className="space-y-4">
                   <div className="flex justify-between items-end mb-2">
                     <span className="text-4xl font-black text-slate-900 leading-none">
-                       {stats.votesCast} / {stats.eligibleVoters}
+                       {stats.votesCast} / {stats.votersReady}
                     </span>
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Localized Ballots</span>
                   </div>
                   <div className="h-4 bg-slate-50 rounded-full overflow-hidden p-1 border border-slate-100 relative shadow-inner">
                     <motion.div 
                       initial={{ width: 0 }}
-                      animate={{ width: `${(stats.votesCast / (stats.eligibleVoters || 1)) * 100}%` }}
+                      animate={{ width: `${(stats.votesCast / (stats.votersReady || 1)) * 100}%` }}
                       className="h-full bg-slate-900 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.2)]"
                     />
                     {isVotingActive && (

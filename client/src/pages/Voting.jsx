@@ -24,6 +24,13 @@ export default function Voting() {
   const [selectedCandidate, setSelectedCandidate] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [voterHash, setVoterHash] = useState(null)
+  const [countdown, setCountdown] = useState(null)
+  const [isInitializing, setIsInitializing] = useState(true)
+
+  // Tracking refs to detect transitions
+  const prevStatus = React.useRef(settings?.status)
+  const prevRound = React.useRef(settings?.round_number)
+  const prevPosId = React.useRef(settings?.current_position_id)
 
   // 1. Identify current active position context
   const currentPos = useMemo(() => {
@@ -62,6 +69,63 @@ export default function Voting() {
        hashVoter(user.id, settings.current_position_id).then(setVoterHash)
     }
   }, [user, settings])
+
+  // 4. REAL-TIME EVENT HANDLER: Detect Voting Start / New Round
+  useEffect(() => {
+    if (!settings) return
+
+    const isVOTING = settings.status === 'VOTING'
+    const wasVOTING = prevStatus.current === 'VOTING'
+
+    const justStarted = !wasVOTING && isVOTING
+    const roundChanged = isVOTING && (
+      prevRound.current !== settings.round_number || 
+      prevPosId.current !== settings.current_position_id
+    )
+
+    console.log(`[VOTING] Status: ${settings.status}, Round: ${settings.round_number}, JustStarted: ${justStarted}, RoundChanged: ${roundChanged}, Init: ${isInitializing}`);
+
+    if ((justStarted || roundChanged) && !isInitializing) {
+      handlePhaseTransition()
+    }
+
+    // Update trackers for next cycle
+    prevStatus.current = settings.status
+    prevRound.current = settings.round_number
+    prevPosId.current = settings.current_position_id
+    
+    // Once we have settings, we are no longer "initializing" for transition detection
+    if (isInitializing) setIsInitializing(false)
+  }, [settings, isInitializing])
+
+  // 📡 STANDBY HEARTBEAT: Self-heal if the hub is stuck in standby during a live session
+  useEffect(() => {
+    if (settings?.status !== 'VOTING' && memberData?.is_voter) {
+        const h = setInterval(() => {
+            console.log("[VOTING] Standby heartbeat check...");
+            syncSystem(true, true);
+        }, 3000); // 3s polling while stuck on standby
+        return () => clearInterval(h);
+    }
+  }, [settings?.status, memberData?.is_voter, syncSystem])
+
+  const handlePhaseTransition = async () => {
+    setSelectedCandidate(null)
+    
+    // Countdown sequence (3 -> 2 -> 1)
+    for (let i = 3; i >= 1; i--) {
+      setCountdown(i)
+      await new Promise(res => setTimeout(res, 1000))
+    }
+    // FINAL PULSE SYNC: Ensure nominees are fresh before revealing
+    try {
+      await syncSystem(true);
+    } catch (e) {
+      console.warn("[VOTING] Pre-revealing sync failed, using store cache.");
+    }
+    
+    setCountdown(null)
+  }
 
   const hashVoter = async (userId, posId) => {
     const msg = `${userId}-${posId}`
@@ -133,7 +197,7 @@ export default function Voting() {
 
   if (loading) return <PageLoader />
 
-  if (!memberData?.is_eligible) return (
+  if (!memberData?.is_voter) return (
     <div className="flex flex-col items-center justify-center min-h-[50vh]">
       <Card className="max-w-md text-center p-12 border-amber-100" hover={false}>
          <div className="mx-auto w-20 h-20 bg-amber-50 rounded-3xl border border-amber-100 flex items-center justify-center mb-8">
@@ -147,7 +211,7 @@ export default function Voting() {
     </div>
   )
 
-  if (settings?.status !== 'VOTING') return (
+  if (settings?.status !== 'VOTING' && countdown === null) return (
     <div className="flex flex-col items-center justify-center min-h-[50vh]">
       <Card className="max-w-md text-center p-12" hover={false}>
          <div className="mx-auto w-20 h-20 bg-slate-50 rounded-3xl border border-slate-100 flex items-center justify-center mb-8">
@@ -249,6 +313,41 @@ export default function Voting() {
           )}
         </AnimatePresence>
       </motion.div>
+
+      {/* COUNTDOWN OVERLAY */}
+      <AnimatePresence mode="wait">
+        {countdown !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-2xl flex items-center justify-center p-6 transition-all duration-700"
+          >
+            <motion.div
+              key={countdown}
+              initial={{ scale: 0.8, opacity: 0, filter: "blur(10px)" }}
+              animate={{ scale: 1, opacity: 1, filter: "blur(0px)" }}
+              exit={{ scale: 2, opacity: 0, filter: "blur(20px)" }}
+              transition={{ 
+                duration: 0.6, 
+                ease: [0.16, 1, 0.3, 1],
+                opacity: { duration: 0.3 }
+              }}
+              className="text-center relative"
+            >
+              <h2 className="text-[12px] font-black text-blue-400 uppercase tracking-[0.6em] mb-4 sm:mb-8 drop-shadow-sm">
+                BWT Protocol: Syncing Ballot
+              </h2>
+              <div className="text-[14rem] sm:text-[20rem] md:text-[24rem] font-black text-white leading-none tracking-tighter drop-shadow-[0_20px_100px_rgba(37,99,235,0.4)] relative z-10">
+                {countdown}
+              </div>
+              <p className="text-sm font-bold text-slate-400 uppercase tracking-[0.3em] mt-8 sm:mt-12 animate-pulse">
+                Establishing Quantum Connection...
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

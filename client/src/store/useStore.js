@@ -13,11 +13,12 @@ export const useStore = create((set, get) => ({
   votes: [],
   initialized: false,
   syncPromise: null, // Track active sync to prevent concurrency issues
+  syncPaused: false, // Flag to temporarily disable background sync during atomic resets
 
   // Global Sync Engine
-  syncSystem: async (silent = true) => {
-    // Prevent concurrent syncs
-    if (get().syncPromise) return get().syncPromise;
+  syncSystem: async (silent = true, force = false) => {
+    // Prevent concurrent syncs unless forced
+    if (!force && (get().syncPaused || get().syncPromise)) return get().syncPromise;
 
     const syncWork = (async () => {
       if (!silent) set({ loading: true });
@@ -29,7 +30,7 @@ export const useStore = create((set, get) => ({
         const [memRes, posRes, setRes, voteRes] = await Promise.all([
           supabase.from('members').select('*').order('name'),
           supabase.from('positions').select('*').order('order'),
-          supabase.from('settings').select('*').limit(1).maybeSingle(),
+          supabase.from('settings').select('*').order('id', { ascending: false }).limit(1).maybeSingle(),
           supabase.from('votes').select('*')
         ]);
 
@@ -61,6 +62,13 @@ export const useStore = create((set, get) => ({
           votes: voteRes.data || get().votes,
           initialized: true
         });
+
+        // RECOVERY LOGIC: Check for missing critical ID and heal if possible
+        if (setRes.data && !setRes.data.current_position_id && posRes.data?.length > 0) {
+           console.warn("[SYNC] settings.current_position_id missing. Healing from first position...");
+           // We don't update DB here to prevent loops, but keep store valid
+           set({ settings: { ...setRes.data, current_position_id: posRes.data[0].id } });
+        }
         
         console.log("[SYNC] Transmission Synchronized.");
       } catch (e) {

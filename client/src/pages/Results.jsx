@@ -27,61 +27,91 @@ export default function Results() {
 
   const [errorMsg, setErrorMsg] = useState("")
 
+  const [electionSnapshots, setElectionSnapshots] = useState([])
+  const [loadingResults, setLoadingResults] = useState(true)
+
+  const fetchResultsData = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('election_results')
+        .select('*')
+        .order('created_at', { ascending: true });
+      
+      if (error) throw error;
+      setElectionSnapshots(data || []);
+    } catch (e) {
+      console.error("Result Snapshot Fault:", e);
+      setErrorMsg("Failed to synchronize with result server.");
+    } finally {
+      setLoadingResults(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchResultsData();
+    // Re-fetch when settings change (round ends)
+    const sub = supabase.channel('standings_sync')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'election_results' }, () => {
+        fetchResultsData();
+      })
+      .subscribe();
+    
+    return () => { supabase.removeChannel(sub) };
+  }, [fetchResultsData, settings?.status]);
+
   const results = useMemo(() => {
     if (!positions || !settings) return []
 
-    return positions.map((p, idx) => {
-      // 1. Contextual Pool Identification
-      // We exclude winners from ALL earlier rounds from this specific round's result view
-      const previousWinners = positions
-        .slice(0, idx)
-        .map(prev => prev.winner_id)
-        .filter(Boolean);
-
-      const positionVotes = votes.filter(v => v.position_id === p.id)
+    return positions.map((p) => {
+      // 1. Identify all Snapshot Data for this Role
+      const roleRecords = electionSnapshots.filter(r => r.role === p.name);
+      const finalWinner = roleRecords.find(r => r.is_final_winner);
       
-      // 2. Derive Candidate Pool for this specific position
-      // A member is included if:
-      // a) They received a vote for this position
-      // b) OR they are the winner of this position
-      // AND c) They were NOT a winner of a PREVIOUS position
-      const candidateIds = Array.from(new Set([
-        ...positionVotes.map(v => v.nominee_id),
-        ...(p.winner_id ? [p.winner_id] : [])
-      ]))
-      .filter(id => id && !previousWinners.includes(id))
+      // 2. Identify the Latest Round with actual nominee tallies
+      const competitiveRounds = roleRecords.filter(r => !r.is_final_winner && r.round_number);
+      const latestRound = competitiveRounds.length > 0 
+        ? Math.max(...competitiveRounds.map(r => r.round_number)) 
+        : 0;
 
-      // 3. Map to Data Objects
-      const candidates = candidateIds
-        .map(id => {
-          const member = members.find(m => m.id === id)
-          const voteCount = positionVotes.filter(v => v.nominee_id === id).length
-          
-          return {
-            id: id,
-            name: member ? member.name : "Unknown Identity",
-            votes: voteCount
-          }
-        })
-        .sort((a,b) => b.votes - a.votes)
+      // 3. Fallback: If no round snapshots exist (legacy), but a winner exists
+      // We synthesize a candidate list from the winner record
+      let candidates = [];
+      if (latestRound > 0) {
+        candidates = roleRecords
+          .filter(r => r.round_number === latestRound && !r.is_final_winner)
+          .map(r => ({
+            id: r.nominee_id,
+            name: r.winner_name,
+            votes: r.votes
+          }))
+          .sort((a,b) => b.votes - a.votes);
+      } else if (finalWinner) {
+        candidates = [{
+          id: p.winner_id,
+          name: finalWinner.winner_name,
+          votes: finalWinner.votes
+        }];
+      }
 
-      const totalPositionVotes = positionVotes.length
-      
-      // 4. Status derivation
+      const totalVotes = candidates.reduce((sum, c) => sum + c.votes, 0);
+
       const currentPosOrder = positions.find(pos => pos.id === settings.current_position_id)?.order || 0
-      const isCompleted = p.winner_id !== null || (settings.status === 'FINISHED') || (p.order < currentPosOrder)
-      const status = isCompleted ? 'COMPLETED' : (settings.current_position_id === p.id ? settings.status : 'PENDING')
+      const isRevealed = p.winner_id !== null || (settings.status === 'FINISHED') || (p.order < currentPosOrder)
+      const status = isRevealed ? 'COMPLETED' : (settings.current_position_id === p.id ? settings.status : 'PENDING')
 
       return {
         ...p,
         candidates,
-        totalVotes: totalPositionVotes,
-        status
+        totalVotes,
+        status,
+        decided_by_admin: finalWinner?.winner_name && !p.winner_id ? true : false,
+        winner_id: p.winner_id,
+        final_winner_name: finalWinner?.winner_name
       }
     })
-  }, [members, positions, votes, settings])
+  }, [positions, electionSnapshots, settings])
 
-  if (loading) return <PageLoader />
+  if (loading || loadingResults) return <PageLoader />
 
   const isLocked = settings?.status === 'VOTING'
 

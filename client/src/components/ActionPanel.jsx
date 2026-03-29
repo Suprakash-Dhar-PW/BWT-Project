@@ -4,7 +4,7 @@ import Card from './Card'
 import Button from './Button'
 
 export default function ActionPanel({ memberData, settings }) {
-  const isVoter = memberData?.is_eligible
+  const isVoter = memberData?.is_voter
   const isAdmin = memberData?.is_admin
   const isVoting = settings?.status === 'VOTING'
 
